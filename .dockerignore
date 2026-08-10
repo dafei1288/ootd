@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+.next
+data
+.env*
+!.env.example
+npm-debug.log*
+Dockerfile
+docker-compose*.yml
+.playwright-mcp
+tsconfig.tsbuildinfo
+*.md
