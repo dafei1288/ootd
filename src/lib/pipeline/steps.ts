@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { chatLLM, imageLLM, LLM_MODEL, IMAGE_MODEL } from './client';
+import { getChatLLM, getImageLLM, LLM_MODEL, IMAGE_MODEL } from './client';
 import { LANG_KEYS, type MultiLang, type TypedTags } from '../config';
 import { IMAGES_DIR, insertLog } from '../db';
 
@@ -25,7 +25,7 @@ async function chat(step: string, system: string, user: string, postId: number |
   const t0 = Date.now();
   const prompt = `[system]\n${system}\n[user]\n${user}`;
   try {
-    const r = await chatLLM.chat.completions.create({
+    const r = await getChatLLM().chat.completions.create({
       model: LLM_MODEL,
       messages: [
         { role: 'system', content: system },
@@ -149,7 +149,7 @@ export async function body(topic: string, postId?: number): Promise<MultiLang> {
 export async function genImage(prompt: string, postId: number): Promise<string> {
   const t0 = Date.now();
   try {
-    const r = await imageLLM.images.generate({
+    const r = await getImageLLM().images.generate({
       model: IMAGE_MODEL,
       prompt,
       n: 1,

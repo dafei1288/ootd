@@ -13,12 +13,12 @@ async function main() {
   console.log('[smoke] parseLLMJson: 3/3 ok');
 
   // 2. deepseek + dmxapi connectivity
-  const { chatLLM, imageLLM, LLM_MODEL, IMAGE_MODEL } = await import('../src/lib/pipeline/client');
+  const { getChatLLM, getImageLLM, LLM_MODEL, IMAGE_MODEL } = await import('../src/lib/pipeline/client');
   const dsIds: string[] = [];
-  for await (const m of await chatLLM.models.list()) dsIds.push(m.id);
+  for await (const m of await getChatLLM().models.list()) dsIds.push(m.id);
   console.log(`[smoke] deepseek reachable, models: ${dsIds.slice(0, 5).join(', ')}`);
   const dmxIds: string[] = [];
-  for await (const m of await imageLLM.models.list()) dmxIds.push(m.id);
+  for await (const m of await getImageLLM().models.list()) dmxIds.push(m.id);
   console.log(`[smoke] dmxapi reachable, ${dmxIds.length} models`);
   console.log(`[smoke] LLM_MODEL=${LLM_MODEL} IMAGE_MODEL=${IMAGE_MODEL}`);
   console.log(

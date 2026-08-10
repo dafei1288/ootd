@@ -30,4 +30,6 @@ COPY --from=builder /app/public ./public
 RUN mkdir -p /app/data/images
 
 EXPOSE 3000
-CMD ["node", "server.js"]
+# Next.js standalone server listens on $HOSTNAME; Docker injects the container
+# id there, so force 0.0.0.0 to keep it reachable on all interfaces.
+CMD ["sh", "-c", "HOSTNAME=0.0.0.0 node server.js"]

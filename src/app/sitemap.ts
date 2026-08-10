@@ -1,11 +1,11 @@
 import type { MetadataRoute } from 'next';
-import { db, distinctTags } from '@/lib/db';
+import { getDb, distinctTags } from '@/lib/db';
 import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
 
 export const dynamic = 'force-dynamic';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const posts = db
+  const posts = getDb()
     .prepare(`SELECT slug, published_at FROM posts WHERE status = 'published' ORDER BY id DESC`)
     .all() as { slug: string; published_at: string | null }[];
 
