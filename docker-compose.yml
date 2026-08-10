@@ -5,7 +5,7 @@ services:
     container_name: alibb-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3035:3000"
     volumes:
       # 本地数据目录（SQLite app.db + images）挂载进容器 /app/data
       - ./data:/app/data
