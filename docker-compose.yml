@@ -1,0 +1,20 @@
+services:
+  web:
+    build: .
+    image: alibb:latest
+    container_name: alibb-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # 本地数据目录（SQLite app.db + images）挂载进容器 /app/data
+      - ./data:/app/data
+    env_file:
+      - path: .env.local
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/robots.txt"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
