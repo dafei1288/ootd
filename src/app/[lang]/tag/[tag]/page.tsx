@@ -1,8 +1,9 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
-import { listPostsByTag } from '@/lib/db';
-import { LANGS, SITE_NAME, langUrl, parseMulti, type Lang } from '@/lib/config';
+import { listPostsByTag, siteName, getTagsForPosts, getCommentCounts } from '@/lib/db';
+import { LANGS, langUrl, type Lang } from '@/lib/config';
+import PostCard from '@/components/PostCard';
 
 export async function generateMetadata({
   params,
@@ -17,7 +18,7 @@ export async function generateMetadata({
     tag = rawTag;
   }
   return {
-    title: `${tag} | ${SITE_NAME}`,
+    title: `${tag} | ${siteName()}`,
     alternates: { canonical: langUrl(lang, `/tag/${encodeURIComponent(tag)}`) },
   };
 }
@@ -34,28 +35,33 @@ export default async function TagPage({ params }: { params: Promise<{ lang: Lang
   if (posts.length === 0) notFound();
   const prefix = LANGS[lang].prefix;
 
+  const tagMap = getTagsForPosts(posts.map((p) => p.id), lang);
+
+  const commentMap = getCommentCounts(posts.map((p) => p.id));
+
+  const liked = new Set<number>();
+  for (const c of (await cookies()).getAll()) {
+    if (c.value === '1') {
+      const m = c.name.match(/^liked_(\d+)$/);
+      if (m) liked.add(Number(m[1]));
+    }
+  }
+
   return (
     <>
       <h1 className="mb-8 text-xl font-bold">{tag}</h1>
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {posts.map((p) => {
-          const t = parseMulti(p.title_json);
-          return (
-            <Link
-              key={p.id}
-              href={`${prefix}/page/${p.slug}`}
-              className="group overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200 transition hover:shadow-md"
-            >
-              {p.image_path && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={`/${p.image_path}`} alt={t?.[lang] ?? ''} className="aspect-square w-full object-cover" />
-              )}
-              <div className="p-4">
-                <h2 className="line-clamp-2 text-sm font-medium group-hover:underline">{t?.[lang] ?? t?.en}</h2>
-              </div>
-            </Link>
-          );
-        })}
+        {posts.map((p) => (
+          <PostCard
+            key={p.id}
+            post={p}
+            lang={lang}
+            prefix={prefix}
+            tags={tagMap.get(p.id) ?? []}
+            liked={liked.has(p.id)}
+            commentCount={commentMap.get(p.id) ?? 0}
+          />
+        ))}
       </div>
     </>
   );
