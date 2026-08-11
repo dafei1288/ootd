@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
-import { TEXT_PRICES, IMAGE_PRICES, type TypedTags } from './config';
+import { TEXT_PRICES, IMAGE_PRICES, SITE_NAME, type TypedTags } from './config';
 
 const dataDir = path.join(process.cwd(), 'data');
 export const IMAGES_DIR = path.join(dataDir, 'images');
@@ -39,6 +39,7 @@ export interface Post {
   error: string | null;
   created_at: string;
   published_at: string | null;
+  likes: number;
 }
 
 function init(): DatabaseSync {
@@ -83,6 +84,48 @@ function init(): DatabaseSync {
       result            TEXT,
       error             TEXT
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
+    CREATE TABLE IF NOT EXISTS search_queries (
+      term     TEXT NOT NULL,
+      lang     TEXT NOT NULL,
+      hits     INTEGER NOT NULL DEFAULT 0,
+      found    INTEGER NOT NULL DEFAULT 0,
+      first_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      last_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      PRIMARY KEY (term, lang)
+    );
+    CREATE TABLE IF NOT EXISTS comments (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    INTEGER NOT NULL REFERENCES posts(id),
+      author     TEXT NOT NULL DEFAULT '',
+      body       TEXT NOT NULL,
+      lang       TEXT NOT NULL DEFAULT 'en',
+      ip         TEXT NOT NULL DEFAULT '',
+      status     TEXT NOT NULL DEFAULT 'approved',
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+    CREATE TABLE IF NOT EXISTS ip_geo (
+      ip         TEXT PRIMARY KEY,
+      country    TEXT NOT NULL DEFAULT '',
+      region     TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS wishes (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      content      TEXT NOT NULL,
+      nickname     TEXT NOT NULL DEFAULT '',
+      lang         TEXT NOT NULL DEFAULT 'en',
+      ip           TEXT NOT NULL DEFAULT '',
+      status       TEXT NOT NULL DEFAULT 'pending',
+      post_id      INTEGER,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      completed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_wishes_status ON wishes(status);
   `);
   try {
     d.exec(`ALTER TABLE llm_logs ADD COLUMN post_id INTEGER`);
@@ -91,6 +134,16 @@ function init(): DatabaseSync {
   }
   try {
     d.exec(`ALTER TABLE post_tags ADD COLUMN kind TEXT NOT NULL DEFAULT 'other'`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    d.exec(`ALTER TABLE posts ADD COLUMN likes INTEGER NOT NULL DEFAULT 0`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    d.exec(`ALTER TABLE comments ADD COLUMN ip TEXT NOT NULL DEFAULT ''`);
   } catch {
     /* column already exists */
   }
@@ -190,6 +243,11 @@ export function retryPost(id: number) {
 
 export function deletePost(id: number) {
   getDb().prepare(`DELETE FROM post_tags WHERE post_id = ?`).run(id);
+  getDb().prepare(`DELETE FROM comments WHERE post_id = ?`).run(id);
+  // A deleted post no longer fulfills its wish → return the wish to the pool.
+  getDb()
+    .prepare(`UPDATE wishes SET status = 'pending', post_id = NULL, completed_at = NULL WHERE post_id = ?`)
+    .run(id);
   getDb().prepare(`DELETE FROM posts WHERE id = ?`).run(id);
 }
 
@@ -294,3 +352,261 @@ export function logCost(l: LLMLog): number | null {
   if (!p) return null;
   return ((l.prompt_tokens ?? 0) * p.input + (l.completion_tokens ?? 0) * p.output) / 1e6;
 }
+
+// --- settings (runtime-configurable site name, etc.) ---
+
+export function getSetting(key: string): string | null {
+  const r = getDb().prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string | null } | undefined;
+  return r?.value ?? null;
+}
+
+export function setSetting(key: string, value: string) {
+  getDb().prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+}
+
+export function siteName(): string {
+  return getSetting('site_name') ?? SITE_NAME;
+}
+
+export function clearLogs() {
+  getDb().prepare(`DELETE FROM llm_logs`).run();
+}
+
+// --- likes ---
+
+export function likePost(id: number) {
+  getDb().prepare(`UPDATE posts SET likes = likes + 1 WHERE id = ?`).run(id);
+}
+
+// --- search term tracking (feeds admin "what to create next") ---
+
+export interface SearchTerm {
+  term: string;
+  lang: string;
+  hits: number;
+  found: number;
+  last_at: string;
+}
+
+export function recordSearch(lang: string, term: string, found: boolean) {
+  getDb()
+    .prepare(
+      `INSERT INTO search_queries (term, lang, hits, found)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(term, lang) DO UPDATE SET
+         hits = hits + 1,
+         found = found + excluded.found,
+         last_at = datetime('now','localtime')`
+    )
+    .run(term, lang, found ? 1 : 0);
+}
+
+export function listSearchTerms(limit = 60): SearchTerm[] {
+  return getDb()
+    .prepare(`SELECT term, lang, hits, found, last_at FROM search_queries ORDER BY hits DESC, last_at DESC LIMIT ?`)
+    .all(limit) as unknown as SearchTerm[];
+}
+
+export function deleteSearchTerm(term: string, lang: string) {
+  getDb().prepare(`DELETE FROM search_queries WHERE term = ? AND lang = ?`).run(term, lang);
+}
+
+// --- batched tags lookup for list pages ---
+
+export function getTagsForPosts(ids: number[], lang: string): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  if (ids.length === 0) return out;
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(`SELECT post_id, tag FROM post_tags WHERE lang = ? AND post_id IN (${placeholders}) ORDER BY post_id, tag`)
+    .all(lang, ...ids) as { post_id: number; tag: string }[];
+  for (const r of rows) {
+    const arr = out.get(r.post_id);
+    if (arr) arr.push(r.tag);
+    else out.set(r.post_id, [r.tag]);
+  }
+  return out;
+}
+
+// --- comments (per-card 留言) ---
+
+export interface Comment {
+  id: number;
+  post_id: number;
+  author: string;
+  body: string;
+  lang: string;
+  ip: string;
+  status: string;
+  created_at: string;
+}
+
+export type CommentWithPost = Comment & { topic: string | null; slug: string | null };
+
+export function insertComment(postId: number, author: string, body: string, lang: string, ip: string): number {
+  const a = author.trim().slice(0, 50);
+  const b = body.trim().slice(0, 1000);
+  const r = getDb()
+    .prepare(`INSERT INTO comments (post_id, author, body, lang, ip, status) VALUES (?, ?, ?, ?, ?, 'approved')`)
+    .run(postId, a, b, lang || 'en', ip.slice(0, 64));
+  return Number(r.lastInsertRowid);
+}
+
+export function listComments(postId: number): Comment[] {
+  return getDb()
+    .prepare(`SELECT * FROM comments WHERE post_id = ? AND status = 'approved' ORDER BY created_at ASC, id ASC`)
+    .all(postId) as unknown as Comment[];
+}
+
+export function getCommentCounts(postIds: number[]): Map<number, number> {
+  const out = new Map<number, number>();
+  if (postIds.length === 0) return out;
+  const placeholders = postIds.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(
+      `SELECT post_id, COUNT(*) AS c FROM comments
+       WHERE status = 'approved' AND post_id IN (${placeholders}) GROUP BY post_id`
+    )
+    .all(...postIds) as { post_id: number; c: number }[];
+  for (const r of rows) out.set(r.post_id, r.c);
+  return out;
+}
+
+export function listAllComments(limit = 200, status?: string): CommentWithPost[] {
+  const where = status && status !== 'all' ? `WHERE c.status = ?` : '';
+  const params = status && status !== 'all' ? [status, limit] : [limit];
+  return getDb()
+    .prepare(
+      `SELECT c.*, p.topic, p.slug FROM comments c
+       LEFT JOIN posts p ON p.id = c.post_id
+       ${where} ORDER BY c.created_at DESC, c.id DESC LIMIT ?`
+    )
+    .all(...params) as unknown as CommentWithPost[];
+}
+
+export function commentStats(): { total: number; approved: number; hidden: number } {
+  return getDb()
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END), 0) AS approved,
+              COALESCE(SUM(CASE WHEN status = 'hidden' THEN 1 ELSE 0 END), 0) AS hidden
+       FROM comments`
+    )
+    .get() as { total: number; approved: number; hidden: number };
+}
+
+export function setCommentStatus(id: number, status: 'approved' | 'hidden') {
+  getDb().prepare(`UPDATE comments SET status = ? WHERE id = ?`).run(status, id);
+}
+
+export function deleteComment(id: number) {
+  getDb().prepare(`DELETE FROM comments WHERE id = ?`).run(id);
+}
+
+// --- IP geolocation cache (admin moderation only) ---
+
+export interface IpGeoRow {
+  ip: string;
+  country: string;
+  region: string;
+}
+
+export function getIpGeo(ips: string[]): Map<string, IpGeoRow> {
+  const out = new Map<string, IpGeoRow>();
+  if (ips.length === 0) return out;
+  const placeholders = ips.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(`SELECT ip, country, region FROM ip_geo WHERE ip IN (${placeholders})`)
+    .all(...ips) as unknown as IpGeoRow[];
+  for (const r of rows) out.set(r.ip, r);
+  return out;
+}
+
+export function saveIpGeo(ip: string, country: string, region: string) {
+  getDb()
+    .prepare(
+      `INSERT INTO ip_geo (ip, country, region) VALUES (?, ?, ?)
+       ON CONFLICT(ip) DO UPDATE SET country = excluded.country, region = excluded.region, updated_at = datetime('now','localtime')`
+    )
+    .run(ip, country, region);
+}
+
+// --- wishes (许愿池) ---
+
+export interface Wish {
+  id: number;
+  content: string;
+  nickname: string;
+  lang: string;
+  ip: string;
+  status: string; // 'pending' | 'done'
+  post_id: number | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export type WishWithPost = Wish & { slug: string | null; post_status: string | null };
+
+export function insertWish(content: string, nickname: string, lang: string, ip: string): number {
+  const r = getDb()
+    .prepare(`INSERT INTO wishes (content, nickname, lang, ip, status) VALUES (?, ?, ?, ?, 'pending')`)
+    .run(content.trim().slice(0, 200), nickname.trim().slice(0, 50), lang || 'en', ip.slice(0, 64));
+  return Number(r.lastInsertRowid);
+}
+
+export function listPendingWishes(limit = 50): Wish[] {
+  return getDb()
+    .prepare(`SELECT * FROM wishes WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?`)
+    .all(limit) as unknown as Wish[];
+}
+
+export function listDoneWishes(limit = 50): WishWithPost[] {
+  return getDb()
+    .prepare(
+      `SELECT w.*, p.slug, p.status AS post_status FROM wishes w
+       LEFT JOIN posts p ON p.id = w.post_id
+       WHERE w.status = 'done' ORDER BY w.completed_at DESC LIMIT ?`
+    )
+    .all(limit) as unknown as WishWithPost[];
+}
+
+export function listAllWishes(limit = 200): WishWithPost[] {
+  return getDb()
+    .prepare(
+      `SELECT w.*, p.slug, p.status AS post_status FROM wishes w
+       LEFT JOIN posts p ON p.id = w.post_id
+       ORDER BY CASE w.status WHEN 'pending' THEN 0 ELSE 1 END, w.created_at DESC LIMIT ?`
+    )
+    .all(limit) as unknown as WishWithPost[];
+}
+
+export function countWishes(): { total: number; pending: number; done: number } {
+  return getDb()
+    .prepare(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+              COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0) AS done
+       FROM wishes`
+    )
+    .get() as { total: number; pending: number; done: number };
+}
+
+export function getWishes(ids: number[]): Wish[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return getDb().prepare(`SELECT * FROM wishes WHERE id IN (${placeholders})`).all(...ids) as unknown as Wish[];
+}
+
+/** Mark wishes fulfilled and link each to its generated post. */
+export function markWishesDone(items: { id: number; postId: number }[]) {
+  const stmt = getDb()
+    .prepare(`UPDATE wishes SET status = 'done', post_id = ?, completed_at = datetime('now','localtime') WHERE id = ?`);
+  for (const it of items) stmt.run(it.postId, it.id);
+}
+
+export function deleteWish(id: number) {
+  getDb().prepare(`DELETE FROM wishes WHERE id = ?`).run(id);
+}
+
+
+

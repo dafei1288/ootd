@@ -1,8 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { getPostBySlug, getTagsForPost } from '@/lib/db';
-import { LANGS, LANG_KEYS, SITE_NAME, langUrl, parseMulti, parseTypedTags, type Lang } from '@/lib/config';
+import { LANGS, LANG_KEYS, langUrl, parseMulti, parseTypedTags, type Lang } from '@/lib/config';
+import { t as ui } from '@/lib/i18n';
+import LikeButton from '@/components/LikeButton';
+import ShareButton from '@/components/ShareButton';
+import Comments from '@/components/Comments';
 
 async function load(params: Promise<{ lang: Lang; slug: string }>) {
   const { lang, slug } = await params;
@@ -29,12 +34,13 @@ export async function generateMetadata({ params }: { params: Promise<{ lang: Lan
 }
 
 export default async function PostPage({ params }: { params: Promise<{ lang: Lang; slug: string }> }) {
-  const { lang, post } = await load(params);
+  const { lang, slug, post } = await load(params);
   if (!post) notFound();
   const t = parseMulti(post.title_json);
   const b = parseMulti(post.body_json);
   const tags = getTagsForPost(post.id, lang);
   const prefix = LANGS[lang].prefix;
+  const liked = (await cookies()).get(`liked_${post.id}`)?.value === '1';
 
   return (
     <article className="mx-auto max-w-3xl">
@@ -47,6 +53,16 @@ export default async function PostPage({ params }: { params: Promise<{ lang: Lan
         className="prose max-w-none leading-7 [&>p]:mb-4"
         dangerouslySetInnerHTML={{ __html: b?.[lang] ?? b?.en ?? '' }}
       />
+      <div className="mt-8 flex items-center gap-3">
+        <LikeButton id={post.id} count={post.likes} liked={liked} ariaLabel={ui('like.aria', lang)} />
+        <ShareButton
+          url={langUrl(lang, `/page/${slug}`)}
+          title={t?.[lang] ?? t?.en}
+          label={ui('share.label', lang)}
+          copiedText={ui('share.copied', lang)}
+          failedText={ui('share.failed', lang)}
+        />
+      </div>
       {tags.length > 0 && (
         <div className="mt-10 flex flex-wrap gap-2">
           {tags.map((tag) => (
@@ -60,6 +76,7 @@ export default async function PostPage({ params }: { params: Promise<{ lang: Lan
           ))}
         </div>
       )}
+      <Comments postId={post.id} lang={lang} />
     </article>
   );
 }
