@@ -2,6 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
+import { after } from 'next/server';
 import { insertTopic, retryPost, deletePost, setSetting, clearLogs, deleteSearchTerm, deleteComment, setCommentStatus, getWishes, markWishesDone, deleteWish } from '@/lib/db';
 import { generateTopics, runPipeline } from '@/lib/pipeline/run';
 
@@ -113,8 +114,10 @@ export async function deleteCommentAction(formData: FormData) {
   revalidatePath('/', 'layout');
 }
 
-/** Execute one or more wishes: seed a post per wish from its content, run the pipeline,
- *  then mark them done and link to the generated post ids. Mirrors importTopics. */
+/** Execute one or more wishes: seed a post per wish from its content, mark them done
+ *  and link to the generated post ids, then kick off generation in the BACKGROUND via
+ *  after(). The pipeline is slow (image + LLM per post), so we don't await it — the
+ *  admin gets an instant response and the wishes show "生成中" until published. */
 export async function executeWishesAction(formData: FormData) {
   if (!(await authed())) return;
   const ids = formData
@@ -124,12 +127,17 @@ export async function executeWishesAction(formData: FormData) {
   if (ids.length === 0) return;
   const wishes = getWishes(ids).filter((w) => w.status === 'pending');
   const done = wishes.map((w) => ({ id: w.id, postId: insertTopic(w.content, 'manual') }));
-  if (done.length > 0) {
-    await runPipeline();
-    markWishesDone(done);
-  }
+  if (done.length === 0) return;
+  markWishesDone(done);
   revalidatePath('/admin_config');
   revalidatePath('/', 'layout');
+  after(async () => {
+    try {
+      await runPipeline();
+    } catch (e) {
+      console.error('[wishes] background pipeline failed:', e);
+    }
+  });
 }
 
 export async function deleteWishAction(formData: FormData) {

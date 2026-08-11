@@ -4,6 +4,7 @@ import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting
 import { TEXT_PRICES, IMAGE_PRICES } from '@/lib/config';
 import { login, logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction } from './actions';
 import ConfirmForm from '@/components/ConfirmForm';
+import SubmitButton from '@/components/SubmitButton';
 import { geoForIps, isPrivateIp, type IpGeo } from '@/lib/geo';
 
 export const dynamic = 'force-dynamic';
@@ -419,9 +420,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               </tbody>
             </table>
           </div>
-          <button type="submit" className="mt-3 rounded-lg bg-neutral-900 px-4 py-2 text-sm text-white">
-            执行选中
-          </button>
+          <div className="mt-3 flex items-center gap-3">
+            <SubmitButton label="执行选中" pendingLabel="执行中…" />
+            <p className="text-xs text-neutral-400">生成在后台进行，刷新页面可查看进度。</p>
+          </div>
         </form>
       )}
 
