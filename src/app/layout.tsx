@@ -1,5 +1,6 @@
 import { headers } from 'next/headers';
 import { LANGS, type Lang } from '@/lib/config';
+import SiteSnippets from '@/components/SiteSnippets';
 import './globals.css';
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -7,7 +8,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const htmlLang = LANGS[lang]?.hreflang ?? 'en';
   return (
     <html lang={htmlLang}>
-      <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased">{children}</body>
+      <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased">
+        {children}
+        <SiteSnippets />
+      </body>
     </html>
   );
 }

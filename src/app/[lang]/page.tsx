@@ -3,19 +3,22 @@ import { cookies } from 'next/headers';
 import { listPublished, siteName, getTagsForPosts, getCommentCounts, recordSearch } from '@/lib/db';
 import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
 import { t } from '@/lib/i18n';
+import { withSeo } from '@/lib/seo';
 import PostCard from '@/components/PostCard';
 
 export async function generateMetadata({ params }: { params: Promise<{ lang: Lang }> }): Promise<Metadata> {
   const { lang } = await params;
   const languages = Object.fromEntries(LANG_KEYS.map((k) => [LANGS[k].hreflang, langUrl(k, '/')]));
-  return {
-    title: siteName(),
-    description: 'Anime character outfit-of-the-day ideas, generated daily.',
-    alternates: {
-      canonical: langUrl(lang, '/'),
-      languages: { ...languages, 'x-default': langUrl('en', '/') },
+  return withSeo(
+    {
+      title: siteName(),
+      alternates: {
+        canonical: langUrl(lang, '/'),
+        languages: { ...languages, 'x-default': langUrl('en', '/') },
+      },
     },
-  };
+    { lang },
+  );
 }
 
 export default async function Home({

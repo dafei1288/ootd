@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting, listSearchTerms, listAllComments, commentStats, listAllWishes, countWishes, type Post, type LogWithTopic, type SearchTerm, type CommentWithPost } from '@/lib/db';
-import { TEXT_PRICES, IMAGE_PRICES } from '@/lib/config';
-import { login, logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction } from './actions';
+import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting, listSearchTerms, listAllComments, commentStats, listAllWishes, countWishes, listSnippets, type Post, type LogWithTopic, type SearchTerm, type CommentWithPost } from '@/lib/db';
+import { TEXT_PRICES, IMAGE_PRICES, LANGS, LANG_KEYS } from '@/lib/config';
+import { login, logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction, saveSnippetAction, setSnippetEnabledAction, deleteSnippetAction, saveSeoAction } from './actions';
 import ConfirmForm from '@/components/ConfirmForm';
 import SubmitButton from '@/components/SubmitButton';
 import { geoForIps, isPrivateIp, type IpGeo } from '@/lib/geo';
+import { getSeo } from '@/lib/seo';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,7 +119,7 @@ function CommentRow({ c, geoMap }: { c: CommentWithPost; geoMap: Map<string, IpG
   );
 }
 
-export default async function AdminPage({ searchParams }: { searchParams: Promise<{ cstatus?: string }> }) {
+export default async function AdminPage({ searchParams }: { searchParams: Promise<{ cstatus?: string; edit_snip?: string }> }) {
   const authed = !!process.env.ADMIN_TOKEN && (await cookies()).get('admin')?.value === process.env.ADMIN_TOKEN;
 
   if (!authed) {
@@ -169,8 +170,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const tagsTop = tagStats(40);
   const currentSiteName = getSetting('site_name') ?? '';
   const searches = listSearchTerms(60);
+  const snippets = listSnippets();
+  const seo = getSeo();
 
-  const { cstatus } = await searchParams;
+  const { cstatus, edit_snip } = await searchParams;
+  const editingSnippet = edit_snip ? snippets.find((s) => s.id === Number(edit_snip)) ?? null : null;
   const commentStatusFilter = cstatus === 'approved' || cstatus === 'hidden' ? cstatus : undefined;
   const comments = listAllComments(200, commentStatusFilter);
   const cStats = commentStats();
@@ -222,6 +226,114 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <button className="mt-3 w-fit rounded bg-red-600 px-3 py-1.5 text-sm text-white">清空 LLM 日志</button>
         </ConfirmForm>
       </div>
+
+      <form action={saveSeoAction} className="mb-8 rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
+        <h2 className="mb-2 font-medium">
+          SEO 设置
+          <span className="ml-3 text-sm font-normal text-neutral-500">默认描述/关键词（按语言）+ 默认分享图；文章页自动用文章图片</span>
+        </h2>
+        <div className="mb-3 space-y-2">
+          {LANG_KEYS.map((k) => (
+            <div key={k} className="grid gap-2 sm:grid-cols-[64px_1fr_1fr]">
+              <span className="pt-2 text-xs text-neutral-500">{LANGS[k].name}</span>
+              <input
+                type="text"
+                name={`desc_${k}`}
+                defaultValue={seo.description?.[k] ?? ''}
+                placeholder="默认描述"
+                className="rounded border border-neutral-300 p-2 text-sm"
+              />
+              <input
+                type="text"
+                name={`kw_${k}`}
+                defaultValue={seo.keywords?.[k] ?? ''}
+                placeholder="关键词，逗号分隔"
+                className="rounded border border-neutral-300 p-2 text-sm"
+              />
+            </div>
+          ))}
+        </div>
+        <label className="mb-1 block text-xs text-neutral-500">默认 OG 分享图（路径或 URL，如 /images/og.png）</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            name="og_image"
+            defaultValue={seo.ogImage ?? ''}
+            placeholder="/images/og.png 或 https://..."
+            className="flex-1 rounded border border-neutral-300 p-2 text-sm"
+          />
+          {seo.ogImage && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={seo.ogImage} alt="" className="h-10 w-10 rounded object-cover" />
+          )}
+        </div>
+        <button className="mt-3 rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">保存</button>
+      </form>
+
+      <section className="mb-8 rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
+        <h2 className="mb-2 font-medium">
+          站点脚本
+          <span className="ml-3 text-sm font-normal text-neutral-500">统计 / 广告代码；启用的脚本注入到全部公开页面，换代码不用改程序</span>
+        </h2>
+
+        <form action={saveSnippetAction} className="mb-4 space-y-2">
+          <input type="hidden" name="id" value={editingSnippet?.id ?? ''} />
+          <input
+            type="text"
+            name="name"
+            defaultValue={editingSnippet?.name ?? ''}
+            placeholder="名称，如：百度统计"
+            className="w-full rounded border border-neutral-300 p-2 text-sm"
+          />
+          <textarea
+            name="content"
+            defaultValue={editingSnippet?.content ?? ''}
+            placeholder={'直接粘贴第三方提供的完整代码，例如：\n<script> ... </script>'}
+            rows={6}
+            className="w-full rounded border border-neutral-300 p-2 font-mono text-xs"
+          />
+          <div className="flex items-center gap-3">
+            <button className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">
+              {editingSnippet ? '更新' : '添加'}
+            </button>
+            {editingSnippet && (
+              <Link href="/admin_config" className="text-sm text-neutral-500 hover:underline">取消</Link>
+            )}
+          </div>
+        </form>
+
+        {snippets.length === 0 ? (
+          <p className="text-sm text-neutral-400">暂无脚本。在上方添加百度统计、AdSense 等代码即可。</p>
+        ) : (
+          <ul className="divide-y divide-neutral-200">
+            {snippets.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">
+                <span className={`rounded px-2 py-0.5 text-xs ${s.enabled ? 'bg-green-100 text-green-800' : 'bg-neutral-200 text-neutral-600'}`}>
+                  {s.enabled ? '启用' : '停用'}
+                </span>
+                <span className="font-medium">{s.name}</span>
+                <span className="hidden max-w-xs truncate text-xs text-neutral-400 sm:inline">
+                  {s.content.replace(/\s+/g, ' ').trim().slice(0, 60)}
+                </span>
+                <div className="ml-auto flex items-center gap-3">
+                  <form action={setSnippetEnabledAction} className="inline">
+                    <input type="hidden" name="id" value={s.id} />
+                    <input type="hidden" name="enabled" value={s.enabled ? '0' : '1'} />
+                    <button className={s.enabled ? 'text-amber-600 hover:underline' : 'text-green-600 hover:underline'}>
+                      {s.enabled ? '停用' : '启用'}
+                    </button>
+                  </form>
+                  <Link href={`/admin_config?edit_snip=${s.id}`} className="text-neutral-600 hover:underline">编辑</Link>
+                  <ConfirmForm action={deleteSnippetAction} confirm="确定删除这条脚本？">
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="text-red-600 hover:underline">删除</button>
+                  </ConfirmForm>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <div className="mb-8 grid gap-4 md:grid-cols-2">
         <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">

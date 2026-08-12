@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { listPendingWishes, listDoneWishes, siteName } from '@/lib/db';
 import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
+import { withSeo } from '@/lib/seo';
 import { t } from '@/lib/i18n';
 import { addWishAction } from '@/app/[lang]/actions';
 import SubmitButton from '@/components/SubmitButton';
@@ -9,13 +10,16 @@ import SubmitButton from '@/components/SubmitButton';
 export async function generateMetadata({ params }: { params: Promise<{ lang: Lang }> }): Promise<Metadata> {
   const { lang } = await params;
   const languages = Object.fromEntries(LANG_KEYS.map((k) => [LANGS[k].hreflang, langUrl(k, '/wish')]));
-  return {
-    title: `${t('nav.wish', lang)} | ${siteName()}`,
-    alternates: {
-      canonical: langUrl(lang, '/wish'),
-      languages: { ...languages, 'x-default': langUrl('en', '/wish') },
+  return withSeo(
+    {
+      title: `${t('nav.wish', lang)} | ${siteName()}`,
+      alternates: {
+        canonical: langUrl(lang, '/wish'),
+        languages: { ...languages, 'x-default': langUrl('en', '/wish') },
+      },
     },
-  };
+    { lang },
+  );
 }
 
 export default async function WishPage({ params }: { params: Promise<{ lang: Lang }> }) {
