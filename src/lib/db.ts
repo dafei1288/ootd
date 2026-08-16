@@ -126,6 +126,14 @@ function init(): DatabaseSync {
       completed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_wishes_status ON wishes(status);
+    CREATE TABLE IF NOT EXISTS site_snippets (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      content    TEXT NOT NULL,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
   `);
   try {
     d.exec(`ALTER TABLE llm_logs ADD COLUMN post_id INTEGER`);
@@ -366,6 +374,47 @@ export function setSetting(key: string, value: string) {
 
 export function siteName(): string {
   return getSetting('site_name') ?? SITE_NAME;
+}
+
+// --- site snippets (admin-managed analytics / ad code, injected on public pages) ---
+
+export interface SiteSnippet {
+  id: number;
+  name: string;
+  content: string;
+  enabled: number; // 0 | 1
+  sort_order: number;
+}
+
+export function listSnippets(): SiteSnippet[] {
+  return getDb()
+    .prepare(`SELECT id, name, content, enabled, sort_order FROM site_snippets ORDER BY sort_order, id`)
+    .all() as unknown as SiteSnippet[];
+}
+
+export function listEnabledSnippets(): SiteSnippet[] {
+  return getDb()
+    .prepare(`SELECT id, name, content, enabled, sort_order FROM site_snippets WHERE enabled = 1 ORDER BY sort_order, id`)
+    .all() as unknown as SiteSnippet[];
+}
+
+export function saveSnippet(id: number | null, name: string, content: string): number {
+  const n = name.trim().slice(0, 80) || '未命名';
+  const c = content.slice(0, 20000);
+  if (id) {
+    getDb().prepare(`UPDATE site_snippets SET name = ?, content = ? WHERE id = ?`).run(n, c, id);
+    return id;
+  }
+  const r = getDb().prepare(`INSERT INTO site_snippets (name, content) VALUES (?, ?)`).run(n, c);
+  return Number(r.lastInsertRowid);
+}
+
+export function setSnippetEnabled(id: number, enabled: boolean) {
+  getDb().prepare(`UPDATE site_snippets SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
+}
+
+export function deleteSnippet(id: number) {
+  getDb().prepare(`DELETE FROM site_snippets WHERE id = ?`).run(id);
 }
 
 export function clearLogs() {

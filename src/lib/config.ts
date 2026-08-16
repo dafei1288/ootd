@@ -12,8 +12,14 @@ export const DEFAULT_LANG: Lang = 'en';
 
 export type MultiLang = Record<Lang, string>;
 
-export const SITE_URL = process.env.SITE_URL ?? 'http://localhost:3000';
+// strip any trailing slash(es) so `${SITE_URL}${path}` never yields a double slash,
+// which breaks crawlers (e.g. WeChat won't render a link card for //images/x.png).
+export const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 export const SITE_NAME = 'Anime OOTD';
+
+// ICP 备案号 + 版权信息：留空时 footer 不显示。仅服务端读取（footer 是 server component）。
+export const ICP = process.env.ICP?.trim() ?? '';
+export const COPYRIGHT = process.env.COPYRIGHT?.trim() ?? '';
 
 export function langUrl(lang: Lang, path: string): string {
   return `${SITE_URL}${LANGS[lang].prefix}${path}`;

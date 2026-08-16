@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { listPostsByTag, siteName, getTagsForPosts, getCommentCounts } from '@/lib/db';
 import { LANGS, langUrl, type Lang } from '@/lib/config';
+import { withSeo } from '@/lib/seo';
 import PostCard from '@/components/PostCard';
 
 export async function generateMetadata({
@@ -17,10 +18,13 @@ export async function generateMetadata({
   } catch {
     tag = rawTag;
   }
-  return {
-    title: `${tag} | ${siteName()}`,
-    alternates: { canonical: langUrl(lang, `/tag/${encodeURIComponent(tag)}`) },
-  };
+  return withSeo(
+    {
+      title: `${tag} | ${siteName()}`,
+      alternates: { canonical: langUrl(lang, `/tag/${encodeURIComponent(tag)}`) },
+    },
+    { lang },
+  );
 }
 
 export default async function TagPage({ params }: { params: Promise<{ lang: Lang; tag: string }> }) {
