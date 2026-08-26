@@ -5,6 +5,10 @@ const PREFIXED = /^\/(zh|jp|kr|es)(\/|$)/;
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // 请求诊断日志（admin 保存问题排查用）
+  if (request.method === 'POST' || pathname === '/admin_config') {
+    console.error(`[req] ${request.method} ${pathname} adminCookie=${request.cookies.get('admin') ? 'Y' : 'N'} actionHeader=${request.headers.get('next-action') ? 'Y' : 'N'}`);
+  }
 
   // /en/* → 301 → /* (default lang lives at root, avoid duplicate content)
   if (pathname === '/en' || pathname.startsWith('/en/')) {

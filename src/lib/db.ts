@@ -40,12 +40,15 @@ export interface Post {
   created_at: string;
   published_at: string | null;
   likes: number;
+  tryon_job_id: number | null;
 }
 
 function init(): DatabaseSync {
   const d = new DatabaseSync(path.join(dataDir, 'app.db'));
   d.exec(`
-    PRAGMA journal_mode = WAL;
+    -- WAL 在 Docker bind mount（Windows）上重启容器时会丢未合并数据，改用 TRUNCATE：
+    -- 事务提交即写主库文件，重启容器数据必定还在（低并发场景足够）
+    PRAGMA journal_mode = TRUNCATE;
     PRAGMA busy_timeout = 5000;
     CREATE TABLE IF NOT EXISTS posts (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,7 +137,37 @@ function init(): DatabaseSync {
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
-  `);
+    CREATE TABLE IF NOT EXISTS tryon_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      type       TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      emoji      TEXT NOT NULL DEFAULT '',
+      prompt     TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tryon_items_type ON tryon_items(type, enabled);
+    CREATE TABLE IF NOT EXISTS tryon_jobs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      uid        TEXT NOT NULL DEFAULT '',
+      items_json TEXT NOT NULL,
+      prompt     TEXT NOT NULL,
+      image_path TEXT,
+      status     TEXT NOT NULL DEFAULT 'pending',
+      error      TEXT,
+      cost       REAL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+      done_at    TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_tryon_jobs_uid ON tryon_jobs(uid, id);
+    CREATE TABLE IF NOT EXISTS tryon_quota (
+      uid   TEXT NOT NULL,
+      date  TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (uid, date)
+    );
+  `)
   try {
     d.exec(`ALTER TABLE llm_logs ADD COLUMN post_id INTEGER`);
   } catch {
@@ -155,6 +188,16 @@ function init(): DatabaseSync {
   } catch {
     /* column already exists */
   }
+  try {
+    d.exec(`ALTER TABLE tryon_items ADD COLUMN names_json TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    d.exec(`ALTER TABLE posts ADD COLUMN tryon_job_id INTEGER`);
+  } catch {
+    /* column already exists */
+  }
   return d;
 }
 
@@ -163,6 +206,84 @@ function init(): DatabaseSync {
 export function insertTopic(topic: string, source: 'manual' | 'auto'): number {
   const r = getDb().prepare(`INSERT INTO posts (topic, source) VALUES (?, ?)`).run(topic, source);
   return Number(r.lastInsertRowid);
+}
+
+/** 创建试衣间卡片（用户发布或管理员代发）。status: 'review' | 'published'。 */
+export function insertTryonPost(opts: {
+  jobId: number;
+  topic: string;
+  imagePath: string;
+  titleJson: string;
+  tagsJson: string;
+  descJson: string | null;
+  bodyJson: string | null;
+  status: 'review' | 'published';
+  slug?: string;
+}): number {
+  const r = getDb()
+    .prepare(
+      `INSERT INTO posts (topic, source, status, slug, image_path, title_json, tags_json, desc_json, body_json, tryon_job_id, published_at)
+       VALUES (?, 'tryon', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      opts.topic.slice(0, 500),
+      opts.status,
+      opts.slug ?? null,
+      opts.imagePath,
+      opts.titleJson,
+      opts.tagsJson,
+      opts.descJson,
+      opts.bodyJson,
+      opts.jobId,
+      opts.status === 'published' ? new Date().toISOString() : null
+    );
+  return Number(r.lastInsertRowid);
+}
+
+/** 待审核卡片（试衣间用户发布）。 */
+export function listReviewPosts(): Post[] {
+  return getDb()
+    .prepare(`SELECT * FROM posts WHERE status = 'review' ORDER BY id DESC LIMIT 100`)
+    .all() as unknown as Post[];
+}
+
+/** 已拒绝（不发布但保留）的试衣间卡片。 */
+export function listRejectedPosts(): Post[] {
+  return getDb()
+    .prepare(`SELECT * FROM posts WHERE status = 'rejected' ORDER BY id DESC LIMIT 100`)
+    .all() as unknown as Post[];
+}
+
+/** 更新卡片内容（重新提交时替换标题/标签/正文等）。 */
+export function updatePostContent(
+  id: number,
+  fields: Partial<Pick<Post, 'title_json' | 'tags_json' | 'desc_json' | 'body_json' | 'topic' | 'slug' | 'published_at'>>
+) {
+  const sets: string[] = [];
+  const params: (string | number | null)[] = [];
+  for (const [col, val] of Object.entries(fields)) {
+    sets.push(`${col} = ?`);
+    params.push(val === undefined ? null : String(val).slice(0, 4000));
+  }
+  if (sets.length === 0) return;
+  params.push(id);
+  getDb().prepare(`UPDATE posts SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+/** 该试衣间任务是否已发布过卡片（防止重复发布）。 */
+export function tryonJobPublished(jobId: number): boolean {
+  const r = getDb().prepare(`SELECT id FROM posts WHERE tryon_job_id = ? LIMIT 1`).get(jobId) as
+    | { id: number }
+    | undefined;
+  return !!r;
+}
+
+export function setPostStatus(id: number, status: string) {
+  getDb().prepare(`UPDATE posts SET status = ? WHERE id = ?`).run(status, id);
+}
+
+export function getTryonPostByJob(jobId: number): Post | undefined {
+  return getDb().prepare(`SELECT * FROM posts WHERE tryon_job_id = ? LIMIT 1`).get(jobId) as Post | undefined;
 }
 
 export function getPost(id: number): Post | undefined {
@@ -204,6 +325,22 @@ export function replaceTags(id: number, typed: TypedTags) {
       }
     }
   }
+}
+
+/** 给卡片追加一个标签（不覆盖现有标签），用于给试衣间卡片打统一标记。 */
+export function addPostTag(id: number, lang: string, tag: string, kind = 'other') {
+  const t = tag.trim();
+  if (!t) return;
+  getDb().prepare(`INSERT OR IGNORE INTO post_tags (post_id, lang, tag, kind) VALUES (?, ?, ?, ?)`).run(id, lang, t.slice(0, 60), kind);
+}
+
+/** 试衣间统一可见标签（方便以后按标签迁移/筛选）。 */
+export function addTryonSourceTag(id: number) {
+  addPostTag(id, 'en', 'Fitting Room', 'other');
+  addPostTag(id, 'zh', '试衣间', 'other');
+  addPostTag(id, 'jp', '試着室', 'other');
+  addPostTag(id, 'kr', '피팅룸', 'other');
+  addPostTag(id, 'es', 'Probador', 'other');
 }
 
 export function getPostBySlug(slug: string): Post | undefined {
@@ -273,8 +410,8 @@ export interface LLMLog {
   error: string | null;
 }
 
-export function insertLog(e: Omit<LLMLog, 'id' | 'ts'>) {
-  getDb().prepare(
+export function insertLog(e: Omit<LLMLog, 'id' | 'ts'>): number {
+  const r = getDb().prepare(
     `INSERT INTO llm_logs (post_id, step, model, prompt, duration_ms, prompt_tokens, completion_tokens, result, error)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -288,6 +425,7 @@ export function insertLog(e: Omit<LLMLog, 'id' | 'ts'>) {
     e.result?.slice(0, 4000) ?? null,
     e.error?.slice(0, 2000) ?? null
   );
+  return Number(r.lastInsertRowid);
 }
 
 export function listLogs(limit = 50): LLMLog[] {
@@ -340,7 +478,7 @@ export function usageByModel(): ModelUsage[] {
               COUNT(*) AS calls,
               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
               COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-              SUM(CASE WHEN step = 'image' AND error IS NULL THEN 1 ELSE 0 END) AS images
+              SUM(CASE WHEN (step = 'image' OR step = 'tryon_image') AND error IS NULL THEN 1 ELSE 0 END) AS images
        FROM llm_logs WHERE error IS NULL GROUP BY model`
     )
     .all() as unknown as ModelUsage[];
@@ -348,7 +486,7 @@ export function usageByModel(): ModelUsage[] {
 
 export function logCost(l: LLMLog): number | null {
   if (l.error) return null;
-  if (l.step === 'image') {
+  if (l.step === 'image' || l.step === 'tryon_image') {
     const ip = IMAGE_PRICES[l.model];
     if (typeof ip === 'number') return ip;
     if (ip && l.prompt_tokens != null && l.completion_tokens != null) {
@@ -655,6 +793,221 @@ export function markWishesDone(items: { id: number; postId: number }[]) {
 
 export function deleteWish(id: number) {
   getDb().prepare(`DELETE FROM wishes WHERE id = ?`).run(id);
+}
+
+// --- try-on room (试衣间) ---
+
+export type TryonItemType = 'model' | 'top' | 'bottom' | 'dress' | 'accessory' | 'scene' | 'style';
+
+export const TRYON_ITEM_TYPES: TryonItemType[] = ['model', 'top', 'bottom', 'dress', 'accessory', 'scene', 'style'];
+
+export interface TryonItem {
+  id: number;
+  type: TryonItemType;
+  name: string;
+  emoji: string;
+  prompt: string;
+  sort_order: number;
+  enabled: number; // 0 | 1
+  names_json: string | null; // MultiLang JSON, e.g. {"en":"White Shirt","zh":"白衬衫",...}
+  created_at: string;
+}
+
+export interface TryonJob {
+  id: number;
+  uid: string;
+  items_json: string;
+  prompt: string;
+  image_path: string | null;
+  status: string; // 'pending' | 'done' | 'failed'
+  error: string | null;
+  cost: number | null;
+  created_at: string;
+  done_at: string | null;
+}
+
+export function listTryonItems(type?: TryonItemType | 'all'): TryonItem[] {
+  const where = type && type !== 'all' ? `WHERE type = ?` : '';
+  const params = type && type !== 'all' ? [type] : [];
+  return getDb()
+    .prepare(`SELECT * FROM tryon_items ${where} ORDER BY type, sort_order, id`)
+    .all(...params) as unknown as TryonItem[];
+}
+
+export function listEnabledTryonItems(type?: TryonItemType): TryonItem[] {
+  const where = type ? `WHERE type = ? AND enabled = 1` : `WHERE enabled = 1`;
+  const params = type ? [type] : [];
+  return getDb()
+    .prepare(`SELECT * FROM tryon_items ${where} ORDER BY type, sort_order, id`)
+    .all(...params) as unknown as TryonItem[];
+}
+
+export function getTryonItem(id: number): TryonItem | undefined {
+  return getDb().prepare(`SELECT * FROM tryon_items WHERE id = ?`).get(id) as TryonItem | undefined;
+}
+
+/** Only returns items that still exist and are enabled — never trusts client ids. */
+export function getEnabledTryonItems(ids: number[]): TryonItem[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return getDb()
+    .prepare(`SELECT * FROM tryon_items WHERE enabled = 1 AND id IN (${placeholders})`)
+    .all(...ids) as unknown as TryonItem[];
+}
+
+export function countTryonItems(): number {
+  return (getDb().prepare(`SELECT COUNT(*) AS c FROM tryon_items`).get() as { c: number }).c;
+}
+
+export function insertTryonItem(
+  type: TryonItemType,
+  name: string,
+  prompt: string,
+  emoji = '',
+  sortOrder = 0,
+  namesJson: string | null = null
+): number {
+  const r = getDb()
+    .prepare(`INSERT INTO tryon_items (type, name, emoji, prompt, sort_order, names_json) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(
+      type,
+      name.trim().slice(0, 60),
+      emoji.trim().slice(0, 8),
+      prompt.trim().slice(0, 500),
+      sortOrder,
+      namesJson ? namesJson.slice(0, 2000) : null
+    );
+  return Number(r.lastInsertRowid);
+}
+
+export function updateTryonItem(id: number, fields: Partial<Pick<TryonItem, 'name' | 'prompt' | 'emoji' | 'sort_order' | 'enabled' | 'names_json'>>) {
+  const sets: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (fields.name !== undefined) {
+    sets.push(`name = ?`);
+    params.push(fields.name.trim().slice(0, 60));
+  }
+  if (fields.prompt !== undefined) {
+    sets.push(`prompt = ?`);
+    params.push(fields.prompt.trim().slice(0, 500));
+  }
+  if (fields.emoji !== undefined) {
+    sets.push(`emoji = ?`);
+    params.push(fields.emoji.trim().slice(0, 8));
+  }
+  if (fields.sort_order !== undefined) {
+    sets.push(`sort_order = ?`);
+    params.push(fields.sort_order);
+  }
+  if (fields.names_json !== undefined) {
+    sets.push(`names_json = ?`);
+    params.push(fields.names_json ? fields.names_json.slice(0, 2000) : null);
+  }
+  if (fields.enabled !== undefined) {
+    sets.push(`enabled = ?`);
+    params.push(fields.enabled ? 1 : 0);
+  }
+  if (sets.length === 0) return;
+  params.push(id);
+  getDb().prepare(`UPDATE tryon_items SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function setTryonItemEnabled(id: number, enabled: boolean) {
+  getDb().prepare(`UPDATE tryon_items SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id);
+}
+
+export function deleteTryonItem(id: number) {
+  getDb().prepare(`DELETE FROM tryon_items WHERE id = ?`).run(id);
+}
+
+export function insertTryonJob(uid: string, itemsJson: string, prompt: string): number {
+  const r = getDb()
+    .prepare(`INSERT INTO tryon_jobs (uid, items_json, prompt, status) VALUES (?, ?, ?, 'pending')`)
+    .run(uid.slice(0, 128), itemsJson.slice(0, 2000), prompt.slice(0, 4000));
+  return Number(r.lastInsertRowid);
+}
+
+export function getTryonJob(id: number): TryonJob | undefined {
+  return getDb().prepare(`SELECT * FROM tryon_jobs WHERE id = ?`).get(id) as TryonJob | undefined;
+}
+
+export function updateTryonJob(
+  id: number,
+  patch: Partial<Pick<TryonJob, 'status' | 'image_path' | 'error' | 'cost' | 'done_at'>>
+) {
+  const sets: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (patch.status !== undefined) {
+    sets.push(`status = ?`);
+    params.push(patch.status);
+  }
+  if (patch.image_path !== undefined) {
+    sets.push(`image_path = ?`);
+    params.push(patch.image_path);
+  }
+  if (patch.error !== undefined) {
+    sets.push(`error = ?`);
+    params.push(patch.error);
+  }
+  if (patch.cost !== undefined) {
+    sets.push(`cost = ?`);
+    params.push(patch.cost);
+  }
+  if (patch.done_at !== undefined) {
+    sets.push(`done_at = ?`);
+    params.push(patch.done_at);
+  }
+  if (sets.length === 0) return;
+  params.push(id);
+  getDb().prepare(`UPDATE tryon_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function listTryonJobs(uid?: string, limit = 30): TryonJob[] {
+  const where = uid ? `WHERE uid = ?` : '';
+  const params = uid ? [uid, limit] : [limit];
+  return getDb()
+    .prepare(`SELECT * FROM tryon_jobs ${where} ORDER BY id DESC LIMIT ?`)
+    .all(...params) as unknown as TryonJob[];
+}
+
+export function countPendingTryon(uid: string): number {
+  return (getDb().prepare(`SELECT COUNT(*) AS c FROM tryon_jobs WHERE uid = ? AND status = 'pending'`).get(uid) as { c: number }).c;
+}
+
+export function deleteTryonJob(id: number) {
+  getDb().prepare(`DELETE FROM tryon_jobs WHERE id = ?`).run(id);
+}
+
+/** Local date key YYYY-MM-DD used for per-user daily quota. */
+export function todayStr(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function getTryonQuota(uid: string, date: string): number {
+  const r = getDb().prepare(`SELECT count FROM tryon_quota WHERE uid = ? AND date = ?`).get(uid, date) as
+    | { count: number }
+    | undefined;
+  return r?.count ?? 0;
+}
+
+export function bumpTryonQuota(uid: string, date: string) {
+  getDb()
+    .prepare(
+      `INSERT INTO tryon_quota (uid, date, count) VALUES (?, ?, 1)
+       ON CONFLICT(uid, date) DO UPDATE SET count = count + 1`
+    )
+    .run(uid, date);
+}
+
+/** Today's tryon cost (done jobs only) — feeds the global daily budget check. */
+export function todayTryonStats(date = todayStr()): { jobs: number; cost: number } {
+  return getDb()
+    .prepare(
+      `SELECT COUNT(*) AS jobs, COALESCE(SUM(CASE WHEN status = 'done' THEN cost ELSE 0 END), 0) AS cost
+       FROM tryon_jobs WHERE date(created_at) = ?`
+    )
+    .get(date) as { jobs: number; cost: number };
 }
 
 

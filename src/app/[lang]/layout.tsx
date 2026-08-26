@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { LANGS, LANG_KEYS, langUrl, ICP, COPYRIGHT, type Lang } from '@/lib/config';
-import { siteName } from '@/lib/db';
+import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
+import { siteName, getSetting } from '@/lib/db';
 import { t } from '@/lib/i18n';
 
 export default async function LangLayout({
@@ -15,6 +15,9 @@ export default async function LangLayout({
   if (!(lang in LANGS)) notFound();
   const l = lang as Lang;
   const name = siteName();
+  // 版权/备案：后台 settings 优先，兼容 .env.local 旧配置
+  const copyright = getSetting('copyright') ?? process.env.COPYRIGHT?.trim() ?? '';
+  const icp = getSetting('icp') ?? process.env.ICP?.trim() ?? '';
   return (
     <div className="mx-auto max-w-5xl px-4">
       <script
@@ -33,6 +36,12 @@ export default async function LangLayout({
           {name}
         </Link>
         <div className="flex items-center gap-4">
+          <Link
+            href={`${LANGS[l].prefix}/tryon`}
+            className="rounded-full bg-pink-500 px-4 py-1.5 text-sm text-white transition hover:bg-pink-600"
+          >
+            🧥 {t('nav.tryon', l)}
+          </Link>
           <Link
             href={`${LANGS[l].prefix}/wish`}
             className="rounded-full bg-neutral-900 px-4 py-1.5 text-sm text-white transition hover:bg-neutral-700"
@@ -55,8 +64,8 @@ export default async function LangLayout({
       <main>{children}</main>
       <footer className="py-10 text-center text-xs text-neutral-400">
         <div>{name}</div>
-        {COPYRIGHT && <div className="mt-1">{COPYRIGHT}</div>}
-        {ICP && (
+        {copyright && <div className="mt-1">{copyright}</div>}
+        {icp && (
           <div className="mt-1">
             <a
               href="https://beian.miit.gov.cn/"
@@ -64,7 +73,7 @@ export default async function LangLayout({
               rel="noopener noreferrer"
               className="hover:text-neutral-600"
             >
-              {ICP}
+              {icp}
             </a>
           </div>
         )}

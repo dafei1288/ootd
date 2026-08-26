@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting, listSearchTerms, listAllComments, commentStats, listAllWishes, countWishes, listSnippets, type Post, type LogWithTopic, type SearchTerm, type CommentWithPost } from '@/lib/db';
-import { TEXT_PRICES, IMAGE_PRICES, LANGS, LANG_KEYS } from '@/lib/config';
-import { login, logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction, saveSnippetAction, setSnippetEnabledAction, deleteSnippetAction, saveSeoAction } from './actions';
+import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting, listSearchTerms, listAllComments, commentStats, listAllWishes, countWishes, listSnippets, listTryonItems, listTryonJobs, todayTryonStats, listReviewPosts, listRejectedPosts, getTagsForPost, getTryonPostByJob, type Post, type LogWithTopic, type CommentWithPost, type TryonItem } from '@/lib/db';
+import { TEXT_PRICES, IMAGE_PRICES, LANGS, LANG_KEYS, parseMulti, type MultiLang } from '@/lib/config';
+import { logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction, saveSeoAction, saveTryonSettingsAction, seedTryonAction, addTryonItemAction, updateTryonItemAction, toggleTryonItemAction, deleteTryonItemAction, deleteTryonJobAction, retryTryonJobAction, approveTryonCardAction, rejectTryonCardAction, reReviewTryonCardAction, adminPublishTryonJobAction } from './actions';
+import { getTryonSettings } from '@/lib/tryon/guard';
 import ConfirmForm from '@/components/ConfirmForm';
 import SubmitButton from '@/components/SubmitButton';
 import { geoForIps, isPrivateIp, type IpGeo } from '@/lib/geo';
@@ -14,12 +15,26 @@ const STATUS_COLOR: Record<string, string> = {
   published: 'bg-green-100 text-green-800',
   failed: 'bg-red-100 text-red-800',
   pending: 'bg-neutral-200 text-neutral-700',
+  review: 'bg-amber-100 text-amber-800',
+  rejected: 'bg-neutral-100 text-neutral-500',
 };
 
 const COMMENT_STATUS_COLOR: Record<string, string> = {
   approved: 'bg-green-100 text-green-800',
   hidden: 'bg-neutral-200 text-neutral-600',
 };
+
+/** 素材的多语言名称（缺省回退中文名），用于 admin 行内编辑 defaultValue。 */
+function itemNames(it: TryonItem): Record<'zh' | 'en' | 'jp' | 'kr' | 'es', string> {
+  const m: Partial<MultiLang> = parseMulti(it.names_json) ?? {};
+  return {
+    zh: (m.zh ?? '').trim() || it.name,
+    en: (m.en ?? '').trim(),
+    jp: (m.jp ?? '').trim(),
+    kr: (m.kr ?? '').trim(),
+    es: (m.es ?? '').trim(),
+  };
+}
 
 function labelFor(g: IpGeo | undefined): string {
   if (!g) return '—';
@@ -45,6 +60,24 @@ function Row({ p }: { p: Post }) {
       <td className="px-2 py-2 text-neutral-500">{p.created_at}</td>
       <td className="px-2 py-2">
         <div className="flex gap-2">
+          {p.status === 'review' && (
+            <>
+              <form action={approveTryonCardAction}>
+                <input type="hidden" name="id" value={p.id} />
+                <button className="text-green-600 hover:underline">通过</button>
+              </form>
+              <form action={rejectTryonCardAction}>
+                <input type="hidden" name="id" value={p.id} />
+                <button className="text-amber-600 hover:underline">拒绝</button>
+              </form>
+            </>
+          )}
+          {p.status === 'rejected' && (
+            <form action={reReviewTryonCardAction}>
+              <input type="hidden" name="id" value={p.id} />
+              <button className="text-blue-600 hover:underline">重新审核</button>
+            </form>
+          )}
           {(p.status === 'failed' || p.attempts > 0) && (
             <form action={retryAction}>
               <input type="hidden" name="id" value={p.id} />
@@ -126,7 +159,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     return (
       <div className="mx-auto max-w-sm py-24">
         <h1 className="mb-6 text-xl font-bold">Admin 登录</h1>
-        <form action={login} className="flex gap-2">
+        <form action="/api/admin/login" method="post" className="flex gap-2">
           <input
             type="password"
             name="token"
@@ -135,6 +168,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           />
           <button className="rounded-lg bg-neutral-900 px-4 py-2 text-white">登录</button>
         </form>
+        <p className="mt-3 text-xs text-amber-600">登录没反应？请先 Ctrl+Shift+R 强制刷新本页。</p>
       </div>
     );
   }
@@ -169,6 +203,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   const tagsTop = tagStats(40);
   const currentSiteName = getSetting('site_name') ?? '';
+  const currentCopyright = getSetting('copyright') ?? '';
+  const currentIcp = getSetting('icp') ?? '';
   const searches = listSearchTerms(60);
   const snippets = listSnippets();
   const seo = getSeo();
@@ -183,6 +219,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const wishes = listAllWishes(200);
   const wStats = countWishes();
   const wishGeoMap = await geoForIps(wishes.map((w) => w.ip));
+
+  const tryonItems = listTryonItems();
+  const tryonJobs = listTryonJobs(undefined, 30);
+  const tryonSettings = getTryonSettings();
+  const tryonToday = todayTryonStats();
+  const reviewPosts = listReviewPosts();
+  const rejectedPosts = listRejectedPosts();
+  const tryonJobPost = new Map(tryonJobs.map((j) => [j.id, getTryonPostByJob(j.id)]));
 
   const groups = new Map<string, { topic: string | null; logs: LogWithTopic[] }>();
   for (const l of listLogsWithTopic(300)) {
@@ -201,15 +245,35 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </form>
       </div>
 
+      <div className="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-xs text-amber-700 ring-1 ring-amber-200">
+        提示：如果下方任何保存按钮点击后没反应，请先按 <b>Ctrl+Shift+R</b> 强制刷新本页（旧页面按钮可能已失效）。
+      </div>
+
       <div className="mb-8 grid gap-4 md:grid-cols-2">
         <form action={saveSettings} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
           <h2 className="mb-2 font-medium">网站设置</h2>
-          <label className="mb-1 block text-xs text-neutral-500">网站名称（页头 / 页脚 / 标题）</label>
+          <label className="mb-1 block text-xs text-neutral-500">网站名称（页头 / 页脚 / 标题 一个框搞定）</label>
           <input
             type="text"
             name="site_name"
             defaultValue={currentSiteName}
             placeholder="Anime OOTD"
+            className="mb-2 w-full rounded border border-neutral-300 p-2 text-sm"
+          />
+          <label className="mb-1 block text-xs text-neutral-500">版权信息（页脚显示，可留空）</label>
+          <input
+            type="text"
+            name="copyright"
+            defaultValue={currentCopyright}
+            placeholder="© 2026 Anime OOTD All Rights Reserved"
+            className="mb-2 w-full rounded border border-neutral-300 p-2 text-sm"
+          />
+          <label className="mb-1 block text-xs text-neutral-500">ICP 备案号（页脚显示并链接工信部，可留空）</label>
+          <input
+            type="text"
+            name="icp"
+            defaultValue={currentIcp}
+            placeholder="京ICP备XXXXXXXX号"
             className="mb-2 w-full rounded border border-neutral-300 p-2 text-sm"
           />
           <button className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">保存</button>
@@ -276,7 +340,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <span className="ml-3 text-sm font-normal text-neutral-500">统计 / 广告代码；启用的脚本注入到全部公开页面，换代码不用改程序</span>
         </h2>
 
-        <form action={saveSnippetAction} className="mb-4 space-y-2">
+        <form action="/api/admin/snippet" method="post" className="mb-4 space-y-2">
+          <input type="hidden" name="_action" value="save" />
           <input type="hidden" name="id" value={editingSnippet?.id ?? ''} />
           <input
             type="text"
@@ -316,7 +381,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                   {s.content.replace(/\s+/g, ' ').trim().slice(0, 60)}
                 </span>
                 <div className="ml-auto flex items-center gap-3">
-                  <form action={setSnippetEnabledAction} className="inline">
+                  <form action="/api/admin/snippet" method="post" className="inline">
+                    <input type="hidden" name="_action" value="toggle" />
                     <input type="hidden" name="id" value={s.id} />
                     <input type="hidden" name="enabled" value={s.enabled ? '0' : '1'} />
                     <button className={s.enabled ? 'text-amber-600 hover:underline' : 'text-green-600 hover:underline'}>
@@ -324,10 +390,11 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                     </button>
                   </form>
                   <Link href={`/admin_config?edit_snip=${s.id}`} className="text-neutral-600 hover:underline">编辑</Link>
-                  <ConfirmForm action={deleteSnippetAction} confirm="确定删除这条脚本？">
+                  <form action="/api/admin/snippet" method="post" className="inline" title="删除后不可恢复">
+                    <input type="hidden" name="_action" value="delete" />
                     <input type="hidden" name="id" value={s.id} />
                     <button className="text-red-600 hover:underline">删除</button>
-                  </ConfirmForm>
+                  </form>
                 </div>
               </li>
             ))}
@@ -538,6 +605,274 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </div>
         </form>
       )}
+
+      <h2 className="mb-3 mt-10 font-medium">🧥 试衣间</h2>
+
+      <div className="mb-4 grid gap-4 md:grid-cols-2">
+        <form action={saveTryonSettingsAction} className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
+          <h3 className="mb-2 font-medium">限额配置</h3>
+          <div className="space-y-2 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" name="enabled" value="1" defaultChecked={tryonSettings.enabled} />
+              启用试衣间（关掉后生成接口直接拒绝）
+            </label>
+            <label className="flex items-center gap-2">
+              每人每天免费张数
+              <input type="number" name="per_user_daily" defaultValue={tryonSettings.perUserDaily} min={0} className="w-20 rounded border border-neutral-300 p-1 text-sm" />
+            </label>
+            <label className="flex items-center gap-2">
+              每日成本熔断(元)
+              <input type="number" name="daily_budget_cny" defaultValue={tryonSettings.dailyBudgetCny} min={0} step={0.5} className="w-24 rounded border border-neutral-300 p-1 text-sm" />
+            </label>
+            <label className="flex items-center gap-2">
+              每人同时待生成任务数
+              <input type="number" name="max_pending_per_user" defaultValue={tryonSettings.maxPendingPerUser} min={0} className="w-20 rounded border border-neutral-300 p-1 text-sm" />
+            </label>
+          </div>
+          <div className="mt-3">
+            <button className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white">保存</button>
+          </div>
+        </form>
+
+        <div className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
+          <h3 className="mb-2 font-medium">今日统计</h3>
+          <ul className="space-y-1 text-sm text-neutral-600">
+            <li>生成请求：{tryonToday.jobs} 次</li>
+            <li>已花费：¥{tryonToday.cost.toFixed(2)}（预算 ¥{tryonSettings.dailyBudgetCny}）</li>
+            <li>素材总数：{tryonItems.length} 条</li>
+            <li>配额说明：IP 为限流主键；本机/内网 IP 不限（开发调试）</li>
+          </ul>
+          <form action={seedTryonAction} className="mt-3">
+            <button className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white">导入种子素材</button>
+          </form>
+        </div>
+      </div>
+
+      <div className="mb-4 rounded-xl bg-white p-4 shadow-sm ring-1 ring-neutral-200">
+        <h3 className="mb-2 font-medium">添加素材</h3>
+        <form action={addTryonItemAction} className="flex flex-wrap items-center gap-2 text-sm">
+          <select name="type" className="rounded border border-neutral-300 p-1.5">
+            {(['model', 'top', 'bottom', 'dress', 'accessory', 'scene', 'style'] as const).map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+          <input name="name" placeholder="名称" className="w-32 rounded border border-neutral-300 p-1.5" />
+          <input name="emoji" placeholder="emoji" className="w-16 rounded border border-neutral-300 p-1.5" />
+          <input name="prompt" placeholder="英文 prompt 片段（拼入最终提示词）" className="min-w-64 flex-1 rounded border border-neutral-300 p-1.5" />
+          <button className="rounded bg-neutral-900 px-3 py-1.5 text-white">添加</button>
+        </form>
+      </div>
+
+      <div className="mb-8 overflow-x-auto rounded-xl bg-white shadow-sm ring-1 ring-neutral-200">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b text-left text-xs text-neutral-500">
+              <th className="px-2 py-2">类型</th>
+              <th className="px-2 py-2">素材（名称 5 语言 + prompt，可编辑）</th>
+              <th className="px-2 py-2">状态</th>
+              <th className="px-2 py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tryonItems.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-2 py-6 text-center text-sm text-neutral-400">
+                  暂无素材，先点「导入种子素材」。
+                </td>
+              </tr>
+            )}
+            {tryonItems.map((it) => {
+              const nm = itemNames(it);
+              return (
+                <tr key={it.id} className="border-t border-neutral-200 text-sm">
+                  <td className="whitespace-nowrap px-2 py-2 text-xs text-neutral-500">{it.type}</td>
+                  <td className="px-2 py-2">
+                    <form action={updateTryonItemAction} className="flex min-w-[720px] flex-wrap items-center gap-1.5">
+                      <input type="hidden" name="id" value={it.id} />
+                      <input name="emoji" defaultValue={it.emoji} className="w-12 rounded border border-neutral-200 p-1 text-center" />
+                      <input name="name_zh" defaultValue={nm.zh} placeholder="中" title="中文名" className="w-28 rounded border border-neutral-200 p-1" />
+                      <input name="name_en" defaultValue={nm.en} placeholder="EN" title="English" className="w-32 rounded border border-neutral-200 p-1 text-xs" />
+                      <input name="name_jp" defaultValue={nm.jp} placeholder="JP" title="日本語" className="w-32 rounded border border-neutral-200 p-1 text-xs" />
+                      <input name="name_kr" defaultValue={nm.kr} placeholder="KR" title="한국어" className="w-32 rounded border border-neutral-200 p-1 text-xs" />
+                      <input name="name_es" defaultValue={nm.es} placeholder="ES" title="Español" className="w-32 rounded border border-neutral-200 p-1 text-xs" />
+                      <input name="prompt" defaultValue={it.prompt} className="min-w-56 flex-1 rounded border border-neutral-200 p-1 text-xs" />
+                      <button className="rounded border border-neutral-300 px-2 py-0.5 text-xs hover:bg-neutral-100">保存</button>
+                    </form>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2">
+                    <span className={`rounded px-1.5 py-0.5 text-xs ${it.enabled ? 'bg-green-100 text-green-800' : 'bg-neutral-200 text-neutral-600'}`}>
+                      {it.enabled ? '启用' : '停用'}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-2">
+                    <div className="flex gap-2">
+                      <form action={toggleTryonItemAction} className="inline">
+                        <input type="hidden" name="id" value={it.id} />
+                        <input type="hidden" name="enabled" value={it.enabled ? '0' : '1'} />
+                        <button className="text-amber-600 hover:underline">{it.enabled ? '停用' : '启用'}</button>
+                      </form>
+                      <form action={deleteTryonItemAction} className="inline">
+                        <input type="hidden" name="id" value={it.id} />
+                        <button className="text-red-600 hover:underline">删除</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200">
+        <div className="border-b px-4 py-3 font-medium">
+          待审核卡片（用户发布）
+          <span className="ml-2 text-sm font-normal text-neutral-500">通过后公开到首页；拒绝则不发布（卡片保留）</span>
+        </div>
+        {reviewPosts.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-neutral-400">暂无待审核卡片。</p>
+        ) : (
+          <ul className="divide-y divide-neutral-200">
+            {reviewPosts.map((p) => {
+              const t = parseMulti(p.title_json);
+              const title = t?.zh ?? t?.en ?? p.topic;
+              return (
+                <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm">
+                  {p.image_path && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/${p.image_path}`} alt="" className="h-14 w-14 rounded object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{title}</p>
+                    <p className="truncate text-xs text-neutral-400">
+                      {getTagsForPost(p.id, 'zh').join(' · ') || '无标签'}
+                      <span className="ml-2">{p.created_at}</span>
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <form action={approveTryonCardAction}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <button className="rounded bg-green-600 px-3 py-1 text-xs text-white hover:bg-green-700">通过</button>
+                    </form>
+                    <form action={rejectTryonCardAction}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <button className="rounded bg-red-600 px-3 py-1 text-xs text-white hover:bg-red-700">拒绝</button>
+                    </form>
+                    {p.slug && (
+                      <a href={`/page/${p.slug}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">查看</a>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {rejectedPosts.length > 0 && (
+        <div className="mb-4 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200">
+          <div className="border-b px-4 py-3 font-medium">
+            已拒绝（未发布，保留记录）
+            <span className="ml-2 text-sm font-normal text-neutral-500">可重新审核或删除</span>
+          </div>
+          <ul className="divide-y divide-neutral-200">
+            {rejectedPosts.map((p) => {
+              const t = parseMulti(p.title_json);
+              const title = t?.zh ?? t?.en ?? p.topic;
+              return (
+                <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm opacity-70">
+                  {p.image_path && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/${p.image_path}`} alt="" className="h-12 w-12 rounded object-cover" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{title}</p>
+                    <p className="truncate text-xs text-neutral-400">{p.created_at}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <form action={reReviewTryonCardAction}>
+                      <input type="hidden" name="id" value={p.id} />
+                      <button className="text-blue-600 hover:underline">重新审核</button>
+                    </form>
+                    <ConfirmForm action={deleteAction} confirm="确定删除这张被拒卡片？">
+                      <input type="hidden" name="id" value={p.id} />
+                      <button className="text-red-600 hover:underline">删除</button>
+                    </ConfirmForm>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      <div className="mb-8 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b text-left text-xs text-neutral-500">
+              <th className="px-2 py-2">ID</th>
+              <th className="px-2 py-2">状态</th>
+              <th className="px-2 py-2">UID</th>
+              <th className="px-2 py-2">Prompt</th>
+              <th className="px-2 py-2">成本¥</th>
+              <th className="px-2 py-2">时间</th>
+              <th className="px-2 py-2">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tryonJobs.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-2 py-6 text-center text-sm text-neutral-400">暂无生成记录。</td>
+              </tr>
+            )}
+            {tryonJobs.map((j) => (
+              <tr key={j.id} className="border-t border-neutral-200 text-sm">
+                <td className="px-2 py-2">{j.id}</td>
+                <td className="px-2 py-2">
+                  <span className={`rounded px-1.5 py-0.5 text-xs ${j.status === 'done' ? 'bg-green-100 text-green-800' : j.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-neutral-200 text-neutral-700'}`}>
+                    {j.status}
+                  </span>
+                </td>
+                <td className="max-w-[100px] truncate px-2 py-2 text-xs text-neutral-500" title={j.uid}>
+                  {j.uid}
+                </td>
+                <td className="max-w-sm truncate px-2 py-2 text-xs text-neutral-600" title={j.prompt}>
+                  {j.error ?? j.prompt}
+                </td>
+                <td className="px-2 py-2">{j.cost != null ? j.cost.toFixed(3) : '-'}</td>
+                <td className="px-2 py-2 text-neutral-500">{j.created_at}</td>
+                <td className="whitespace-nowrap px-2 py-2">
+                  <div className="flex gap-2">
+                    {j.image_path && (
+                      <a href={`/images/${j.image_path.split('/').pop()}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                        图
+                      </a>
+                    )}
+                    {j.status === 'done' && !tryonJobPost.get(j.id) && (
+                      <form action={adminPublishTryonJobAction} className="inline">
+                        <input type="hidden" name="id" value={j.id} />
+                        <button className="text-green-600 hover:underline">管理员发布</button>
+                      </form>
+                    )}
+                    {j.status === 'failed' && (
+                      <form action={retryTryonJobAction} className="inline">
+                        <input type="hidden" name="id" value={j.id} />
+                        <button className="text-blue-600 hover:underline">重试</button>
+                      </form>
+                    )}
+                    <form action={deleteTryonJobAction} className="inline">
+                      <input type="hidden" name="id" value={j.id} />
+                      <button className="text-red-600 hover:underline">删除</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <h2 className="mb-3 mt-10 font-medium">
         标签热度

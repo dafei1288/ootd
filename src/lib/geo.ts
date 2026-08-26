@@ -6,7 +6,7 @@ export interface IpGeo {
 }
 
 /** Localhost / private / link-local / ULA ranges — not worth a lookup, shown as 本地. */
-const PRIVATE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|fe80:|f[cd][0-9a-f]{2}:)/i;
+const PRIVATE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|fe80:|f[cd][0-9a-f]{2}:|::ffff:(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.))/i;
 
 export function isPrivateIp(ip: string): boolean {
   return !ip || PRIVATE.test(ip);

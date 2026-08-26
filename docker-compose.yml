@@ -12,6 +12,10 @@ services:
     env_file:
       - path: .env.local
         required: false
+    environment:
+      # 固定 server action 加密密钥：容器重建后 action id 保持稳定，
+      # 避免浏览器里缓存的页面引用失效（表现为后台按钮点击无反应、保存静默失败）
+      - NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=alibb-fixed-action-key-2026
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/robots.txt"]
       interval: 30s

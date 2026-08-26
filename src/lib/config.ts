@@ -57,3 +57,13 @@ export const IMAGE_PRICES: Record<string, number | { input: number; output: numb
   'gpt-image-2': { input: 24.82, output: 148.92 },
   'doubao-seedream-4-5-251128': 0.25,
 };
+
+// --- try-on room (试衣间) runtime defaults; overridable via settings table (admin) ---
+
+export const TRYON_DEFAULTS = {
+  enabled: true,
+  perUserDaily: 3, // 每人每天免费生成次数
+  dailyBudgetCny: 50, // 每日全局成本熔断上限(元)
+  maxPendingPerUser: 1, // 同一用户同时最多待生成任务数
+  estimateCnyPerImage: 0.3, // 生成前预估单张成本(元),用于预算熔断预判
+} as const;

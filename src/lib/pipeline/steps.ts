@@ -149,27 +149,9 @@ export async function body(topic: string, postId?: number): Promise<MultiLang> {
 export async function genImage(prompt: string, postId: number): Promise<string> {
   const t0 = Date.now();
   try {
-    const r = await getImageLLM().images.generate({
-      model: IMAGE_MODEL,
-      prompt,
-      n: 1,
-      size: (process.env.IMAGE_SIZE ?? '2048x2048') as '1024x1024',
-    });
-    const item = r.data?.[0];
-    if (!item) throw new Error('image API returned no data');
-    const u = r.usage as { prompt_tokens?: number; input_tokens?: number; output_tokens?: number; total_tokens?: number } | undefined;
-    const inTok = u?.prompt_tokens ?? u?.input_tokens ?? null;
-    const outTok = u?.output_tokens ?? (u?.total_tokens != null && inTok != null ? u.total_tokens - inTok : null);
+    const { buffer, promptTokens, completionTokens } = await fetchImage(prompt);
     const file = path.join(IMAGES_DIR, `${postId}.png`);
-    if (item.b64_json) {
-      fs.writeFileSync(file, Buffer.from(item.b64_json, 'base64'));
-    } else if (item.url) {
-      const resp = await fetch(item.url);
-      if (!resp.ok) throw new Error(`image download failed: ${resp.status}`);
-      fs.writeFileSync(file, Buffer.from(await resp.arrayBuffer()));
-    } else {
-      throw new Error('image API returned neither url nor b64_json');
-    }
+    fs.writeFileSync(file, buffer);
     const rel = `images/${postId}.png`;
     insertLog({
       post_id: postId,
@@ -177,8 +159,8 @@ export async function genImage(prompt: string, postId: number): Promise<string> 
       model: IMAGE_MODEL,
       prompt,
       duration_ms: Date.now() - t0,
-      prompt_tokens: inTok,
-      completion_tokens: outTok,
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
       result: rel,
       error: null,
     });
@@ -197,4 +179,32 @@ export async function genImage(prompt: string, postId: number): Promise<string> 
     });
     throw e;
   }
+}
+
+/**
+ * Call the image model and return the raw PNG buffer plus token usage.
+ * Shared by the content pipeline (genImage) and the try-on room.
+ */
+export async function fetchImage(prompt: string): Promise<{ buffer: Buffer; promptTokens: number | null; completionTokens: number | null }> {
+  const r = await getImageLLM().images.generate({
+    model: IMAGE_MODEL,
+    prompt,
+    n: 1,
+    size: (process.env.IMAGE_SIZE ?? '1024x1024') as '1024x1024',
+  });
+  const item = r.data?.[0];
+  if (!item) throw new Error('image API returned no data');
+  const u = r.usage as { prompt_tokens?: number; input_tokens?: number; output_tokens?: number; total_tokens?: number } | undefined;
+  const promptTokens = u?.prompt_tokens ?? u?.input_tokens ?? null;
+  const completionTokens =
+    u?.output_tokens ?? (u?.total_tokens != null && promptTokens != null ? u.total_tokens - promptTokens : null);
+  if (item.b64_json) {
+    return { buffer: Buffer.from(item.b64_json, 'base64'), promptTokens, completionTokens };
+  }
+  if (item.url) {
+    const resp = await fetch(item.url);
+    if (!resp.ok) throw new Error(`image download failed: ${resp.status}`);
+    return { buffer: Buffer.from(await resp.arrayBuffer()), promptTokens, completionTokens };
+  }
+  throw new Error('image API returned neither url nor b64_json');
 }

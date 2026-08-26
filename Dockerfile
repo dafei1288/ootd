@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # ---------- deps ----------
 FROM node:24-alpine AS deps
 WORKDIR /app
