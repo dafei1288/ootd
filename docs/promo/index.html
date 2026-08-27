@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anime OOTD · AI 驱动的全球多语言内容站系统</title>
+<meta name="description" content="Anime OOTD：一套用 AI 全自动生产多语言内容的网站系统。主题生成、AI 出图、五语言 SEO、AI 试衣间、许愿池，一次搭建，全球获客。">
+<style>
+  :root {
+    --bg: #0b0b12;
+    --bg-soft: #12121d;
+    --card: rgba(255, 255, 255, 0.04);
+    --card-border: rgba(255, 255, 255, 0.09);
+    --text: #f2f2f8;
+    --muted: #9a9ab0;
+    --pink: #ff5fa2;
+    --violet: #8b5cf6;
+    --cyan: #22d3ee;
+    --grad: linear-gradient(120deg, #ff5fa2 0%, #8b5cf6 50%, #22d3ee 100%);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+  ::selection { background: var(--violet); color: #fff; }
+
+  /* ---- 背景光斑 ---- */
+  .glow {
+    position: fixed; border-radius: 50%; filter: blur(120px);
+    opacity: .35; pointer-events: none; z-index: 0;
+  }
+  .glow-1 { width: 520px; height: 520px; background: #8b5cf6; top: -160px; left: -120px; }
+  .glow-2 { width: 460px; height: 460px; background: #ff5fa2; top: 30%; right: -180px; }
+  .glow-3 { width: 420px; height: 420px; background: #22d3ee; bottom: -140px; left: 30%; opacity: .22; }
+
+  .wrap { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---- 导航 ---- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(14px);
+    background: rgba(11, 11, 18, 0.72);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .logo { font-size: 20px; font-weight: 800; letter-spacing: .5px; text-decoration: none; color: var(--text); }
+  .logo em {
+    font-style: normal;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .nav-links { display: flex; gap: 28px; }
+  .nav-links a {
+    color: var(--muted); text-decoration: none; font-size: 14px; transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta {
+    padding: 8px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+    color: #fff !important; background: var(--grad); background-size: 180% 180%;
+    transition: transform .2s, box-shadow .2s;
+  }
+  .nav-cta:hover { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(139, 92, 246, .45); }
+
+  /* ---- Hero ---- */
+  .hero { padding: 110px 0 90px; text-align: center; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 16px; border-radius: 999px; font-size: 13px; color: var(--muted);
+    border: 1px solid var(--card-border); background: var(--card);
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; box-shadow: 0 0 10px #34d399; }
+  .hero h1 {
+    margin: 28px auto 20px; max-width: 860px;
+    font-size: clamp(34px, 6vw, 62px); font-weight: 900; line-height: 1.25; letter-spacing: 1px;
+  }
+  .hero h1 .grad {
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.sub { max-width: 640px; margin: 0 auto; color: var(--muted); font-size: 17px; }
+  .hero-actions { margin-top: 40px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 14px 34px; border-radius: 14px;
+    font-size: 16px; font-weight: 700; text-decoration: none; transition: transform .2s, box-shadow .2s;
+  }
+  .btn-primary { color: #fff; background: var(--grad); background-size: 180% 180%; box-shadow: 0 8px 30px rgba(139, 92, 246, .35); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 40px rgba(255, 95, 162, .4); }
+  .btn-ghost { color: var(--text); border: 1px solid var(--card-border); background: var(--card); }
+  .btn-ghost:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.25); }
+
+  .hero-langs { margin-top: 56px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .lang-chip {
+    padding: 8px 18px; border-radius: 999px; font-size: 14px;
+    border: 1px solid var(--card-border); background: var(--card); color: var(--muted);
+  }
+  .lang-chip b { color: var(--text); font-weight: 600; }
+
+  /* ---- 数据条 ---- */
+  .stats {
+    margin: 20px 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+  }
+  .stat {
+    padding: 28px 20px; border-radius: 18px; text-align: center;
+    background: var(--card); border: 1px solid var(--card-border);
+  }
+  .stat .num {
+    font-size: 34px; font-weight: 900;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .stat .label { margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+  /* ---- 通用 Section ---- */
+  section { padding: 90px 0; }
+  .sec-head { text-align: center; margin-bottom: 56px; }
+  .sec-head .kicker {
+    font-size: 13px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sec-head h2 { margin-top: 10px; font-size: clamp(26px, 4vw, 40px); font-weight: 900; }
+  .sec-head p { margin-top: 12px; color: var(--muted); max-width: 620px; margin-left: auto; margin-right: auto; }
+
+  /* ---- 流水线 ---- */
+  .pipeline { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .step {
+    position: relative; padding: 26px 16px; border-radius: 16px; text-align: center;
+    background: var(--card); border: 1px solid var(--card-border);
+    transition: transform .25s, border-color .25s;
+  }
+  .step:hover { transform: translateY(-6px); border-color: rgba(139, 92, 246, .5); }
+  .step .icon { font-size: 30px; }
+  .step h3 { margin-top: 12px; font-size: 15px; font-weight: 700; }
+  .step p { margin-top: 6px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .step .idx {
+    position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+    width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--grad); color: #fff;
+  }
+
+  /* ---- 特性卡片 ---- */
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .feature {
+    padding: 32px 28px; border-radius: 20px;
+    background: var(--card); border: 1px solid var(--card-border);
+    transition: transform .25s, border-color .25s;
+  }
+  .feature:hover { transform: translateY(-6px); border-color: rgba(34, 211, 238, .4); }
+  .feature .icon {
+    width: 52px; height: 52px; border-radius: 14px; font-size: 26px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(139,92,246,.25), rgba(34,211,238,.18));
+    border: 1px solid rgba(139, 92, 246, .3);
+  }
+  .feature h3 { margin-top: 18px; font-size: 19px; font-weight: 800; }
+  .feature p { margin-top: 8px; font-size: 14px; color: var(--muted); }
+  .feature ul { margin: 12px 0 0 0; padding: 0; list-style: none; }
+  .feature li { font-size: 13px; color: var(--muted); padding: 3px 0 3px 18px; position: relative; }
+  .feature li::before { content: "✦"; position: absolute; left: 0; color: var(--violet); font-size: 11px; }
+
+  /* ---- 亮点双栏 ---- */
+  .spotlight {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center;
+  }
+  .spotlight .mock {
+    border-radius: 22px; padding: 28px; min-height: 300px;
+    background: linear-gradient(160deg, rgba(139,92,246,.16), rgba(255,95,162,.08));
+    border: 1px solid var(--card-border);
+    display: flex; flex-direction: column; gap: 14px; justify-content: center;
+  }
+  .mock-card {
+    padding: 16px 18px; border-radius: 14px; font-size: 14px;
+    background: rgba(11,11,18,.65); border: 1px solid var(--card-border);
+  }
+  .mock-card .tag { font-size: 11px; color: var(--cyan); letter-spacing: 1px; }
+  .mock-card b { display: block; margin-top: 4px; }
+  .mock-card span { color: var(--muted); font-size: 12.5px; }
+  .spotlight h3 { font-size: 28px; font-weight: 900; }
+  .spotlight h3 .grad {
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .spotlight p.desc { margin-top: 14px; color: var(--muted); font-size: 15px; }
+  .spotlight ul { margin-top: 20px; padding: 0; list-style: none; }
+  .spotlight li { padding: 8px 0 8px 30px; position: relative; font-size: 14.5px; color: #d5d5e4; }
+  .spotlight li::before {
+    content: "✓"; position: absolute; left: 0; top: 8px;
+    width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(52, 211, 153, .15); color: #34d399;
+  }
+
+  /* ---- 成本表 ---- */
+  .cost-table {
+    max-width: 720px; margin: 0 auto; border-radius: 20px; overflow: hidden;
+    border: 1px solid var(--card-border);
+  }
+  .cost-row {
+    display: grid; grid-template-columns: 1.4fr 1fr 1.6fr;
+    padding: 16px 24px; font-size: 14px;
+    background: var(--card); border-bottom: 1px solid var(--card-border);
+  }
+  .cost-row:last-child { border-bottom: none; }
+  .cost-row.head { background: rgba(139, 92, 246, .12); font-weight: 700; color: var(--text); }
+  .cost-row .c2 { color: var(--cyan); font-weight: 700; }
+  .cost-row .c3 { color: var(--muted); }
+
+  /* ---- 技术栈 ---- */
+  .stack { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .stack .pill {
+    padding: 12px 26px; border-radius: 999px; font-size: 15px; font-weight: 600;
+    background: var(--card); border: 1px solid var(--card-border);
+  }
+
+  /* ---- CTA ---- */
+  .cta {
+    margin: 40px 0 90px; padding: 70px 40px; border-radius: 28px; text-align: center;
+    background: linear-gradient(140deg, rgba(255,95,162,.14), rgba(139,92,246,.16), rgba(34,211,238,.12));
+    border: 1px solid var(--card-border);
+  }
+  .cta h2 { font-size: clamp(26px, 4vw, 40px); font-weight: 900; }
+  .cta p { margin: 14px auto 32px; color: var(--muted); max-width: 540px; }
+
+  footer {
+    padding: 36px 0 48px; border-top: 1px solid rgba(255,255,255,.06);
+    text-align: center; color: var(--muted); font-size: 13px;
+  }
+
+  /* ---- 动效 ---- */
+  .reveal { opacity: 0; transform: translateY(28px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.show { opacity: 1; transform: none; }
+
+  @media (max-width: 900px) {
+    .pipeline { grid-template-columns: repeat(3, 1fr); }
+    .features { grid-template-columns: 1fr 1fr; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .spotlight { grid-template-columns: 1fr; }
+    .nav-links { display: none; }
+  }
+  @media (max-width: 560px) {
+    .features { grid-template-columns: 1fr; }
+    .pipeline { grid-template-columns: 1fr 1fr; }
+    .cost-row { grid-template-columns: 1fr; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+<div class="glow glow-3"></div>
+
+<nav>
+  <div class="wrap">
+    <a class="logo" href="#">Anime <em>OOTD</em></a>
+    <div class="nav-links">
+      <a href="#pipeline">AI 流水线</a>
+      <a href="#features">核心能力</a>
+      <a href="#tryon">AI 试衣间</a>
+      <a href="#cost">运营成本</a>
+      <a href="#stack">技术栈</a>
+    </div>
+    <a class="nav-cta" href="#cta">开始了解</a>
+  </div>
+</nav>
+
+<!-- ============ HERO ============ -->
+<header class="hero wrap">
+  <span class="badge"><span class="dot"></span>AI 驱动 · 全球多语言 · 全自动内容生产</span>
+  <h1>让 <span class="grad">AI 打工仔</span><br>替你运营一个全球内容网站</h1>
+  <p class="sub">
+    Anime OOTD 是一套 AI 驱动的多语言内容站系统：从选题、出图、文案到 SEO，
+    全部由 AI 流水线自动完成，一次搭建，面向全球五种语言持续产出内容。
+  </p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#pipeline">看看它怎么工作 →</a>
+    <a class="btn btn-ghost" href="#features">核心能力</a>
+  </div>
+  <div class="hero-langs">
+    <span class="lang-chip">🇺🇸 <b>English</b></span>
+    <span class="lang-chip">🇨🇳 <b>简体中文</b></span>
+    <span class="lang-chip">🇯🇵 <b>日本語</b></span>
+    <span class="lang-chip">🇰🇷 <b>한국어</b></span>
+    <span class="lang-chip">🇪🇸 <b>Español</b></span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stats reveal">
+    <div class="stat"><div class="num">5</div><div class="label">语言版本 · 全球同步发布</div></div>
+    <div class="stat"><div class="num">6</div><div class="label">个 AI 角色组成的内容流水线</div></div>
+    <div class="stat"><div class="num">100%</div><div class="label">选题到上线全自动化</div></div>
+    <div class="stat"><div class="num">¥0.25</div><div class="label">起 / 张 · AI 出图成本可控</div></div>
+  </div>
+</div>
+
+<!-- ============ 流水线 ============ -->
+<section id="pipeline" class="wrap">
+  <div class="sec-head reveal">
+    <div class="kicker">AI Pipeline</div>
+    <h2>六个 AI 打工人，一条全自动流水线</h2>
+    <p>手动批量导入主题，或让定时任务完全托管——AI 各司其职，最终组合成一个完整的多语言内容页上线。</p>
+  </div>
+  <div class="pipeline reveal">
+    <div class="step"><span class="idx">1</span><div class="icon">💡</div><h3>主题策划</h3><p>AI 自动生成选题：角色 × 风格 × 场景，也可后台批量导入</p></div>
+    <div class="step"><span class="idx">2</span><div class="icon">✍️</div><h3>绘图提示词</h3><p>把主题提炼成简洁精准的英文 Prompt，JSON 结构化输出</p></div>
+    <div class="step"><span class="idx">3</span><div class="icon">🎨</div><h3>AI 出图</h3><p>对接绘图模型生成穿搭图，按张计费、成本透明</p></div>
+    <div class="step"><span class="idx">4</span><div class="icon">🌐</div><h3>多语言标题</h3><p>标题党高手一次产出 5 种语言的网页标题</p></div>
+    <div class="step"><span class="idx">5</span><div class="icon">🏷️</div><h3>标签与描述</h3><p>NLP 分词生成标签 / keywords，SEO 高手撰写 description</p></div>
+    <div class="step"><span class="idx">6</span><div class="icon">📖</div><h3>正文创作</h3><p>杂志视角扩写正文，审核后自动发布上线</p></div>
+  </div>
+</section>
+
+<!-- ============ 核心能力 ============ -->
+<section id="features" class="wrap">
+  <div class="sec-head reveal">
+    <div class="kicker">Features</div>
+    <h2>为「躺着挣钱」而生的核心能力</h2>
+    <p>流量先行、窄业务、小产品——把做网站流程里涉及人的环节，统统换成 AI。</p>
+  </div>
+  <div class="features reveal">
+    <div class="feature">
+      <div class="icon">🌍</div>
+      <h3>全球多语言架构</h3>
+      <p>一套内容，五种语言同步发行，让全世界各种语言的读者都能进入你的网站。</p>
+      <ul>
+        <li>独立语言 URL 前缀（/zh /jp /kr /es）</li>
+        <li>hreflang + canonical + x-default 完整标注</li>
+        <li>默认语言 301 归一，杜绝重复内容</li>
+      </ul>
+    </div>
+    <div class="feature">
+      <div class="icon">🔍</div>
+      <h3>SEO 全栈优化</h3>
+      <p>从 URL 到结构化数据，每一处都为搜索引擎精心设计。</p>
+      <ul>
+        <li>Friendly URL Slug 自动生成</li>
+        <li>标签聚合页 / 搜索结果页均可被收录</li>
+        <li>Sitemap、Robots、JSON-LD 开箱即用</li>
+      </ul>
+    </div>
+    <div class="feature">
+      <div class="icon">👗</div>
+      <h3>AI 试衣间</h3>
+      <p>互动玩法留住用户：选模特、选穿搭、选配饰、选场景，一键生成专属穿搭图。</p>
+      <ul>
+        <li>每人每日免费配额，防滥用</li>
+        <li>每日全局成本熔断，预算可控</li>
+        <li>生成结果可沉淀为新内容页</li>
+      </ul>
+    </div>
+    <div class="feature">
+      <div class="icon">⭐</div>
+      <h3>许愿池共创</h3>
+      <p>用户许下想看的穿搭——谁、什么风格，系统挑选并自动生成，内容选题来自真实需求。</p>
+      <ul>
+        <li>用户提交 → 进入生产队列</li>
+        <li>完成后公开展示，形成社区氛围</li>
+      </ul>
+    </div>
+    <div class="feature">
+      <div class="icon">💬</div>
+      <h3>互动与传播</h3>
+      <p>点赞、评论、分享按钮内置，让每一篇内容都有机会自传播。</p>
+      <ul>
+        <li>轻量评论系统，免注册</li>
+        <li>一键分享到社交平台</li>
+      </ul>
+    </div>
+    <div class="feature">
+      <div class="icon">🛠️</div>
+      <h3>全能管理后台</h3>
+      <p>内容队列、审核发布、成本统计、广告位管理，一个后台全部搞定。</p>
+      <ul>
+        <li>内容流水线状态可视化，失败可重试</li>
+        <li>LLM 调用日志 + 分模型成本核算</li>
+        <li>Snippets 广告位（对接 AdSense 变现）</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 试衣间亮点 ============ -->
+<section id="tryon" class="wrap">
+  <div class="spotlight reveal">
+    <div class="mock">
+      <div class="mock-card"><span class="tag">STEP 1 · 模特</span><b>选择模特</b><span>不同风格的虚拟模特任你挑选</span></div>
+      <div class="mock-card"><span class="tag">STEP 2 · 穿搭</span><b>上衣 / 下装 / 外套 / 鞋子</b><span>从内容站沉淀的穿搭库中自由组合</span></div>
+      <div class="mock-card"><span class="tag">STEP 3 · 配饰 & 场景</span><b>耳环 · 发箍 · 街头 · 海边</b><span>细节拉满，氛围感一键到位</span></div>
+      <div class="mock-card"><span class="tag">GO ✨</span><b>生成专属穿搭图</b><span>成本熔断保护，超预算自动暂停</span></div>
+    </div>
+    <div>
+      <h3>不只是内容站<br>更是一个 <span class="grad">可玩的 AI 应用</span></h3>
+      <p class="desc">试衣间把「看内容」升级为「玩内容」。用户停留更久、分享更多，而生成的每一张图，又可以回流为新的内容页，形成内容飞轮。</p>
+      <ul>
+        <li>每日免费 3 次，超出自然引导回访</li>
+        <li>每日预算熔断（默认 ¥50），绝不烧钱失控</li>
+        <li>同一用户并发任务限制，防刷防薅</li>
+        <li>生成作品自动进入待发布队列，审核后上线</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 成本 ============ -->
+<section id="cost" class="wrap">
+  <div class="sec-head reveal">
+    <div class="kicker">Cost</div>
+    <h2>白菜价的运营成本</h2>
+    <p>前期框架搭好、自动化跑通之后，剩下的就是让 AI 替你打工。</p>
+  </div>
+  <div class="cost-table reveal">
+    <div class="cost-row head"><div>项目</div><div>成本</div><div>说明</div></div>
+    <div class="cost-row"><div>🌐 域名</div><div class="c2">≈ ¥100 / 年</div><div class="c3">国外平台购买，免备案</div></div>
+    <div class="cost-row"><div>🖥️ 服务器</div><div class="c2">白菜价 VPS</div><div class="c3">单容器 Docker 即可跑全套</div></div>
+    <div class="cost-row"><div>⚡ CDN / 防护</div><div class="c2">¥0 起</div><div class="c3">Cloudflare 免费额度初期足够</div></div>
+    <div class="cost-row"><div>📝 文本模型</div><div class="c2">≈ ¥1 / 百万 tokens</div><div class="c3">低级别模型即可，成本占比极小</div></div>
+    <div class="cost-row"><div>🎨 图像生成</div><div class="c2">¥0.25 起 / 张</div><div class="c3">多档模型可选，后台实时核算成本</div></div>
+    <div class="cost-row"><div>💰 变现方式</div><div class="c2">Google AdSense</div><div class="c3">Snippets 广告位后台一键管理</div></div>
+  </div>
+</section>
+
+<!-- ============ 技术栈 ============ -->
+<section id="stack" class="wrap">
+  <div class="sec-head reveal">
+    <div class="kicker">Tech Stack</div>
+    <h2>现代化技术栈，一个人也能维护</h2>
+  </div>
+  <div class="stack reveal">
+    <span class="pill">Next.js 16</span>
+    <span class="pill">React 19</span>
+    <span class="pill">TypeScript</span>
+    <span class="pill">Tailwind CSS v4</span>
+    <span class="pill">SQLite</span>
+    <span class="pill">OpenAI SDK</span>
+    <span class="pill">Docker</span>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<div class="wrap" id="cta">
+  <div class="cta reveal">
+    <h2>更高的生产力 = 更多的尝试<br>更多的尝试 = 更多的机会</h2>
+    <p>人工服务 → 半自动化 → 全自动化。把重复的工作交给 AI，把好奇心和好点子留给自己。</p>
+    <a class="btn btn-primary" href="#pipeline">重温 AI 流水线</a>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    Anime OOTD · AI 驱动的全球多语言内容站系统<br>
+    Built with Next.js 16 · Powered by AI Pipeline
+  </div>
+</footer>
+
+<script>
+  // 滚动渐入动画
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add('show'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+</script>
+</body>
+</html>

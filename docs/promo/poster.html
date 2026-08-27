@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Anime OOTD · 宣传海报 1080×1440</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    min-height: 100vh;
+    background: #1a1a24;
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  }
+
+  /* ========== 海报画布：1080 × 1440（3:4 竖版） ========== */
+  .poster {
+    width: 1080px; height: 1440px; flex: none;
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(ellipse 700px 500px at 15% -5%, rgba(139, 92, 246, .45), transparent 60%),
+      radial-gradient(ellipse 700px 560px at 95% 30%, rgba(255, 95, 162, .38), transparent 60%),
+      radial-gradient(ellipse 800px 600px at 50% 108%, rgba(34, 211, 238, .30), transparent 62%),
+      #0b0b12;
+    color: #f2f2f8;
+    box-shadow: 0 40px 120px rgba(0, 0, 0, .6);
+    border-radius: 12px;
+  }
+
+  /* 网格纹理 */
+  .poster::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(ellipse at 50% 40%, #000 30%, transparent 75%);
+  }
+
+  .inner {
+    position: relative; z-index: 2;
+    height: 100%; padding: 88px 80px;
+    display: flex; flex-direction: column;
+  }
+
+  /* 顶部 Logo 行 */
+  .top-row { display: flex; align-items: center; justify-content: space-between; }
+  .logo { font-size: 34px; font-weight: 900; letter-spacing: 1px; }
+  .logo em {
+    font-style: normal;
+    background: linear-gradient(120deg, #ff5fa2, #8b5cf6, #22d3ee);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lang-flags { font-size: 26px; letter-spacing: 10px; }
+
+  /* 主标题 */
+  .headline { margin-top: 108px; }
+  .kicker {
+    display: inline-block;
+    padding: 12px 30px; border-radius: 999px;
+    font-size: 22px; letter-spacing: 6px; font-weight: 700;
+    color: #22d3ee; border: 2px solid rgba(34, 211, 238, .4);
+    background: rgba(34, 211, 238, .08);
+  }
+  .headline h1 {
+    margin-top: 40px;
+    font-size: 108px; font-weight: 900; line-height: 1.28; letter-spacing: 4px;
+  }
+  .headline h1 .grad {
+    background: linear-gradient(120deg, #ff5fa2 0%, #8b5cf6 50%, #22d3ee 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .headline .sub {
+    margin-top: 34px; font-size: 32px; line-height: 1.8; color: #b6b6cc; max-width: 880px;
+  }
+  .headline .sub b { color: #f2f2f8; }
+
+  /* 卖点卡片 */
+  .points {
+    margin-top: auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 26px;
+  }
+  .point {
+    padding: 34px 36px; border-radius: 24px;
+    background: rgba(255, 255, 255, .05);
+    border: 1.5px solid rgba(255, 255, 255, .1);
+    backdrop-filter: blur(6px);
+  }
+  .point .ic { font-size: 42px; }
+  .point h3 { margin-top: 14px; font-size: 30px; font-weight: 800; }
+  .point p { margin-top: 8px; font-size: 21px; color: #9a9ab0; line-height: 1.65; }
+
+  /* 底部条 */
+  .bottom {
+    margin-top: 44px; padding-top: 38px;
+    border-top: 1.5px solid rgba(255, 255, 255, .12);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .bottom .tags { display: flex; gap: 14px; }
+  .bottom .tag {
+    padding: 12px 24px; border-radius: 999px; font-size: 20px; font-weight: 600;
+    background: rgba(139, 92, 246, .16); border: 1.5px solid rgba(139, 92, 246, .4);
+    color: #d8ccff;
+  }
+  .bottom .url {
+    font-size: 24px; font-weight: 800; letter-spacing: 1px;
+    background: linear-gradient(120deg, #ff5fa2, #8b5cf6, #22d3ee);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  /* 装饰圆圈 */
+  .ring {
+    position: absolute; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .07);
+    z-index: 1;
+  }
+  .ring-1 { width: 420px; height: 420px; top: -140px; right: -120px; }
+  .ring-2 { width: 300px; height: 300px; bottom: 220px; left: -130px; border-color: rgba(34, 211, 238, .12); }
+
+  .hint {
+    margin-left: 32px; color: #8a8aa0; font-size: 14px; line-height: 2; max-width: 220px;
+  }
+  .hint code { color: #22d3ee; }
+
+  /* 精确导出模式：窗口正好 1080×1440 时，海报铺满视口 */
+  @media (max-width: 1160px), (max-height: 1520px) {
+    body { padding: 0; }
+    .hint { display: none; }
+    .poster { border-radius: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="poster" id="poster">
+  <div class="ring ring-1"></div>
+  <div class="ring ring-2"></div>
+  <div class="inner">
+
+    <div class="top-row">
+      <div class="logo">Anime <em>OOTD</em></div>
+      <div class="lang-flags">🇺🇸 🇨🇳 🇯🇵 🇰🇷 🇪🇸</div>
+    </div>
+
+    <div class="headline">
+      <span class="kicker">AI 驱动 · 全球多语言内容站系统</span>
+      <h1>让 <span class="grad">AI 打工仔</span><br>替你运营全球网站</h1>
+      <p class="sub">
+        选题 · 出图 · 五语言文案 · SEO，<b>六个 AI 角色一条流水线</b>全自动完成。<br>
+        一次搭建，面向全球 <b>5 种语言</b>持续产出内容，躺着把钱挣。
+      </p>
+    </div>
+
+    <div class="points">
+      <div class="point">
+        <div class="ic">🤖</div>
+        <h3>全自动内容流水线</h3>
+        <p>主题策划 → AI 出图 → 标题 / 标签 / 正文，定时任务全程托管</p>
+      </div>
+      <div class="point">
+        <div class="ic">🌍</div>
+        <h3>五语言全球发行</h3>
+        <p>英 / 中 / 日 / 韩 / 西，hreflang + SEO 全栈优化开箱即用</p>
+      </div>
+      <div class="point">
+        <div class="ic">👗</div>
+        <h3>AI 试衣间 · 许愿池</h3>
+        <p>互动玩法留住用户，生成内容回流沉淀，形成内容飞轮</p>
+      </div>
+      <div class="point">
+        <div class="ic">💰</div>
+        <h3>白菜价运营成本</h3>
+        <p>域名 ¥100/年 · 出图 ¥0.25 起/张 · AdSense 一键变现</p>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <div class="tags">
+        <span class="tag">Next.js 16</span>
+        <span class="tag">React 19</span>
+        <span class="tag">AI Pipeline</span>
+        <span class="tag">Docker</span>
+      </div>
+      <div class="url">ANIME&nbsp;OOTD</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="hint">
+  <b>导出方式</b><br>
+  1. 浏览器打开本文件<br>
+  2. 直接对海报截图（海报精确为 <code>1080×1440</code> px）<br>
+  3. 或用 <code>npx hyperframes</code> / Playwright / Chrome 无头截图：
+  <code>--window-size=1160,1560</code>
+</div>
+
+</body>
+</html>
