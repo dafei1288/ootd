@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { listAll, usageByModel, logCost, listLogsWithTopic, tagStats, getSetting, listSearchTerms, listAllComments, commentStats, listAllWishes, countWishes, listSnippets, listTryonItems, listTryonJobs, todayTryonStats, listReviewPosts, listRejectedPosts, getTagsForPost, getTryonPostByJob, type Post, type LogWithTopic, type CommentWithPost, type TryonItem } from '@/lib/db';
-import { TEXT_PRICES, IMAGE_PRICES, LANGS, LANG_KEYS, parseMulti, type MultiLang } from '@/lib/config';
-import { logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction, saveSeoAction, saveTryonSettingsAction, seedTryonAction, addTryonItemAction, updateTryonItemAction, toggleTryonItemAction, deleteTryonItemAction, deleteTryonJobAction, retryTryonJobAction, approveTryonCardAction, rejectTryonCardAction, reReviewTryonCardAction, adminPublishTryonJobAction } from './actions';
+import { TEXT_PRICES, IMAGE_PRICES, LANGS, LANG_KEYS, SITE_URL, parseMulti, type MultiLang } from '@/lib/config';
+import { logout, importTopics, genTopicsAction, runAction, retryAction, deleteAction, saveSettings, clearLogsAction, seedFromSearchAction, dismissSearchAction, hideCommentAction, approveCommentAction, deleteCommentAction, executeWishesAction, deleteWishAction, saveSeoAction, saveTryonSettingsAction, seedTryonAction, addTryonItemAction, updateTryonItemAction, toggleTryonItemAction, deleteTryonItemAction, deleteTryonJobAction, retryTryonJobAction, approveTryonCardAction, rejectTryonCardAction, reReviewTryonCardAction, adminPublishTryonJobAction, removeTryonItemImageAction } from './actions';
 import { getTryonSettings } from '@/lib/tryon/guard';
 import ConfirmForm from '@/components/ConfirmForm';
 import SubmitButton from '@/components/SubmitButton';
@@ -36,9 +36,15 @@ function itemNames(it: TryonItem): Record<'zh' | 'en' | 'jp' | 'kr' | 'es', stri
   };
 }
 
+/** ISO 3166-1 alpha-2 → 国旗 emoji；非法 / 未知返回空串 */
+function flagEmoji(cc?: string): string {
+  if (!cc || !/^[a-zA-Z]{2}$/.test(cc)) return '';
+  return cc.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
+}
+
 function labelFor(g: IpGeo | undefined): string {
   if (!g) return '—';
-  return [g.country, g.region].filter(Boolean).join(' ') || '—';
+  return [flagEmoji(g.countryCode), g.country, g.region, g.city].filter(Boolean).join(' ') || '—';
 }
 
 function Row({ p }: { p: Post }) {
@@ -203,6 +209,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   const tagsTop = tagStats(40);
   const currentSiteName = getSetting('site_name') ?? '';
+  const currentSiteUrl = getSetting('site_url') ?? '';
   const currentCopyright = getSetting('copyright') ?? '';
   const currentIcp = getSetting('icp') ?? '';
   const searches = listSearchTerms(60);
@@ -214,11 +221,12 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const commentStatusFilter = cstatus === 'approved' || cstatus === 'hidden' ? cstatus : undefined;
   const comments = listAllComments(200, commentStatusFilter);
   const cStats = commentStats();
-  const geoMap = await geoForIps(comments.map((c) => c.ip));
-
   const wishes = listAllWishes(200);
   const wStats = countWishes();
-  const wishGeoMap = await geoForIps(wishes.map((w) => w.ip));
+  const [geoMap, wishGeoMap] = await Promise.all([
+    geoForIps(comments.map((c) => c.ip)),
+    geoForIps(wishes.map((w) => w.ip)),
+  ]);
 
   const tryonItems = listTryonItems();
   const tryonJobs = listTryonJobs(undefined, 30);
@@ -260,6 +268,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             placeholder="Anime OOTD"
             className="mb-2 w-full rounded border border-neutral-300 p-2 text-sm"
           />
+          <label className="mb-1 block text-xs text-neutral-500">网站 URL（canonical / sitemap / robots / OG 图的基准域名，留空则用 .env 的 SITE_URL）</label>
+          <input
+            type="text"
+            name="site_url"
+            defaultValue={currentSiteUrl}
+            placeholder={SITE_URL}
+            className="mb-2 w-full rounded border border-neutral-300 p-2 text-sm"
+          />
           <label className="mb-1 block text-xs text-neutral-500">版权信息（页脚显示，可留空）</label>
           <input
             type="text"
@@ -296,6 +312,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           SEO 设置
           <span className="ml-3 text-sm font-normal text-neutral-500">默认描述/关键词（按语言）+ 默认分享图；文章页自动用文章图片</span>
         </h2>
+        <p className="mb-3 text-xs text-neutral-400">
+          canonical / sitemap / robots 使用「网站设置」里的网站 URL（留空则用 .env 的 SITE_URL）。
+        </p>
         <div className="mb-3 space-y-2">
           {LANG_KEYS.map((k) => (
             <div key={k} className="grid gap-2 sm:grid-cols-[64px_1fr_1fr]">
@@ -670,6 +689,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <thead>
             <tr className="border-b text-left text-xs text-neutral-500">
               <th className="px-2 py-2">类型</th>
+              <th className="px-2 py-2">图</th>
               <th className="px-2 py-2">素材（名称 5 语言 + prompt，可编辑）</th>
               <th className="px-2 py-2">状态</th>
               <th className="px-2 py-2">操作</th>
@@ -688,6 +708,66 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               return (
                 <tr key={it.id} className="border-t border-neutral-200 text-sm">
                   <td className="whitespace-nowrap px-2 py-2 text-xs text-neutral-500">{it.type}</td>
+                  <td className="whitespace-nowrap px-2 py-2 align-top">
+                    <div className="flex gap-2">
+                      {(['default', 'anime', 'real'] as const).map((st) => {
+                        const p =
+                          st === 'default'
+                            ? it.image_path
+                            : st === 'anime'
+                              ? it.image_path_anime
+                              : it.image_path_real;
+                        const label = st === 'default' ? '展示' : st === 'anime' ? '动漫' : '真人';
+                        return (
+                          <div key={st} className="flex flex-col items-center gap-1">
+                            <div className="relative">
+                              {p ? (
+                                <>
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={`/images/${p.split('/').pop()}`}
+                                    alt={label}
+                                    className="h-14 w-14 rounded object-cover"
+                                  />
+                                  <form action={removeTryonItemImageAction} title={`删除${label}图`}>
+                                    <input type="hidden" name="id" value={it.id} />
+                                    <input type="hidden" name="style" value={st} />
+                                    <button className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[10px] leading-4 text-white">
+                                      ✕
+                                    </button>
+                                  </form>
+                                </>
+                              ) : (
+                                <div className="flex h-14 w-14 items-center justify-center rounded border border-dashed border-neutral-300 text-[10px] text-neutral-300">
+                                  {label}
+                                </div>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-neutral-400">{label}</span>
+                            <form
+                              action="/api/admin/tryon-item-image"
+                              method="post"
+                              encType="multipart/form-data"
+                              className="flex flex-col items-center gap-0.5"
+                            >
+                              <input type="hidden" name="id" value={it.id} />
+                              <input type="hidden" name="style" value={st} />
+                              <input
+                                type="file"
+                                name="file"
+                                accept="image/png,image/jpeg,image/webp"
+                                required
+                                className="w-20 text-[9px]"
+                              />
+                              <button className="rounded border border-neutral-300 px-1.5 py-0.5 text-[10px] hover:bg-neutral-100">
+                                上传
+                              </button>
+                            </form>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </td>
                   <td className="px-2 py-2">
                     <form action={updateTryonItemAction} className="flex min-w-[720px] flex-wrap items-center gap-1.5">
                       <input type="hidden" name="id" value={it.id} />

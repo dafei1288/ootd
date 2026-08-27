@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   countTryonItems,
   getEnabledTryonItems,
@@ -5,6 +7,7 @@ import {
   insertTryonItem,
   listEnabledTryonItems,
   updateTryonItem,
+  IMAGES_DIR,
   type TryonItem,
   type TryonItemType,
 } from '../db';
@@ -94,6 +97,62 @@ export function itemName(it: Pick<TryonItem, 'name' | 'names_json'>, lang: Lang)
   const m = parseMulti(it.names_json);
   if (m) return m[lang]?.trim() || m.en?.trim() || it.name;
   return it.name;
+}
+
+// ---------------------------------------------------------------------------
+// 参考图（B 档：按图组合生成）——素材图按画风拆分，生成时按选中画风取用
+// ---------------------------------------------------------------------------
+
+export type StyleKind = 'anime' | 'real';
+
+/** 从选中素材里判断画风（style 素材的名称/prompt 含关键词）；缺省 anime。 */
+export function styleKindOf(items: Pick<TryonItem, 'type' | 'name' | 'prompt'>[]): StyleKind {
+  const s = items.find((i) => i.type === 'style');
+  const text = `${s?.name ?? ''} ${s?.prompt ?? ''}`.toLowerCase();
+  if (/photo|real|photoreal|写实|真人/.test(text)) return 'real';
+  return 'anime';
+}
+
+/** 某素材在指定画风下的参考图（画风图缺失时回退通用图）。 */
+export function refImageFor(it: TryonItem, kind: StyleKind): string | null {
+  if (kind === 'real') return it.image_path_real ?? it.image_path;
+  return it.image_path_anime ?? it.image_path;
+}
+
+const REF_MAX = 6; // seedream 多参考图上限，防止元素过多崩图
+
+// 参考图优先级：人物形象 → 场景 → 服装 → 配饰（先保主体，配饰后补）
+const REF_ORDER: Record<TryonItemType, number> = {
+  model: 0,
+  scene: 1,
+  top: 2,
+  bottom: 2,
+  dress: 2,
+  accessory: 3,
+  style: 9,
+};
+
+/**
+ * 收集选中素材的参考图（data URL 数组，最多 REF_MAX 张）。
+ * 跳过 style（画风是文字风格，不参与按图组合）；model/scene 也纳入参考。
+ */
+export function collectRefImages(ids: number[], kind: StyleKind): string[] {
+  const items = [...getEnabledTryonItems(ids)].sort((a, b) => REF_ORDER[a.type] - REF_ORDER[b.type]);
+  const out: string[] = [];
+  for (const it of items) {
+    if (it.type === 'style') continue;
+    const rel = refImageFor(it, kind);
+    if (!rel) continue;
+    try {
+      const file = path.join(IMAGES_DIR, rel.split('/').pop() ?? rel);
+      const buf = fs.readFileSync(file);
+      out.push(`data:image/png;base64,${buf.toString('base64')}`);
+      if (out.length >= REF_MAX) break;
+    } catch {
+      /* 文件缺失跳过 */
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

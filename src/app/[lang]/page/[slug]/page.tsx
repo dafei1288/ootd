@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { getPostBySlug, getTagsForPost, siteName } from '@/lib/db';
-import { LANGS, LANG_KEYS, langUrl, parseMulti, parseTypedTags, type Lang } from '@/lib/config';
+import { LANGS, LANG_KEYS, parseMulti, parseTypedTags, type Lang } from '@/lib/config';
+import { langUrl } from '@/lib/site';
 import { withSeo, absImage } from '@/lib/seo';
 import { t as ui } from '@/lib/i18n';
 import LikeButton from '@/components/LikeButton';
@@ -47,6 +48,15 @@ export default async function PostPage({ params }: { params: Promise<{ lang: Lan
   const prefix = LANGS[lang].prefix;
   const liked = (await cookies()).get(`liked_${post.id}`)?.value === '1';
 
+  const title = t?.[lang] ?? t?.en;
+  const postUrl = langUrl(lang, `/page/${slug}`);
+  // 面包屑：首页 → 首个标签（如有）→ 本篇
+  const crumbs = [{ position: 1, name: siteName(), item: langUrl(lang, '/') }];
+  if (tags[0]) {
+    crumbs.push({ position: 2, name: tags[0], item: langUrl(lang, `/tag/${encodeURIComponent(tags[0])}`) });
+  }
+  crumbs.push({ position: crumbs.length + 1, name: title ?? '', item: postUrl });
+
   return (
     <article className="mx-auto max-w-3xl">
       <script
@@ -55,20 +65,31 @@ export default async function PostPage({ params }: { params: Promise<{ lang: Lan
           __html: JSON.stringify({
             '@context': 'https://schema.org',
             '@type': 'Article',
-            headline: t?.[lang] ?? t?.en,
+            headline: title,
             description: d?.[lang] ?? d?.en,
-            image: absImage(post.image_path ?? undefined),
+            image: await absImage(post.image_path ?? undefined),
             datePublished: post.published_at ?? undefined,
+            inLanguage: LANGS[lang].hreflang,
+            keywords: tags.join(', '),
+            articleSection: tags[0] ?? undefined,
             author: { '@type': 'Organization', name: siteName() },
             publisher: { '@type': 'Organization', name: siteName() },
-            mainEntityOfPage: { '@type': 'WebPage', '@id': langUrl(lang, `/page/${slug}`) },
+            mainEntityOfPage: { '@type': 'WebPage', '@id': postUrl },
           }),
         }}
       />
-      <h1 className="mb-6 text-2xl font-bold leading-snug">{t?.[lang] ?? t?.en}</h1>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify({
+          '@context': 'https://schema.org',
+          '@type': 'BreadcrumbList',
+          itemListElement: crumbs,
+        }) }}
+      />
+      <h1 className="mb-6 text-2xl font-bold leading-snug">{title}</h1>
       {post.image_path && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={`/${post.image_path}`} alt={t?.[lang] ?? ''} className="mb-8 w-full rounded-xl object-cover" />
+        <img src={`/${post.image_path}`} alt={title} className="mb-8 w-full rounded-xl object-cover" />
       )}
       <div
         className="prose max-w-none leading-7 [&>p]:mb-4"
@@ -77,8 +98,8 @@ export default async function PostPage({ params }: { params: Promise<{ lang: Lan
       <div className="mt-8 flex items-center gap-3">
         <LikeButton id={post.id} count={post.likes} liked={liked} ariaLabel={ui('like.aria', lang)} />
         <ShareButton
-          url={langUrl(lang, `/page/${slug}`)}
-          title={t?.[lang] ?? t?.en}
+          url={postUrl}
+          title={title}
           label={ui('share.label', lang)}
           copiedText={ui('share.copied', lang)}
           failedText={ui('share.failed', lang)}

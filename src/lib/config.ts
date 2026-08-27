@@ -14,16 +14,13 @@ export type MultiLang = Record<Lang, string>;
 
 // strip any trailing slash(es) so `${SITE_URL}${path}` never yields a double slash,
 // which breaks crawlers (e.g. WeChat won't render a link card for //images/x.png).
+// 仅作 .env 回退值；服务端统一用 @/lib/site 的 siteUrl()（后台 settings 可覆盖）。
 export const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
 export const SITE_NAME = 'Anime OOTD';
 
 // ICP 备案号 + 版权信息：留空时 footer 不显示。仅服务端读取（footer 是 server component）。
 export const ICP = process.env.ICP?.trim() ?? '';
 export const COPYRIGHT = process.env.COPYRIGHT?.trim() ?? '';
-
-export function langUrl(lang: Lang, path: string): string {
-  return `${SITE_URL}${LANGS[lang].prefix}${path}`;
-}
 
 export function parseMulti(json: string | null): MultiLang | null {
   if (!json) return null;
@@ -56,6 +53,8 @@ export const TEXT_PRICES: Record<string, { input: number; output: number }> = {
 export const IMAGE_PRICES: Record<string, number | { input: number; output: number }> = {
   'gpt-image-2': { input: 24.82, output: 148.92 },
   'doubao-seedream-4-5-251128': 0.25,
+  // B 档多参考图生成（试衣间默认模型）；单价为估计值，待 dmxapi 核实
+  'doubao-seedream-4-0-250828': 0.5,
 };
 
 // --- try-on room (试衣间) runtime defaults; overridable via settings table (admin) ---

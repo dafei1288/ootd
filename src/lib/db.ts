@@ -112,10 +112,12 @@ function init(): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
     CREATE TABLE IF NOT EXISTS ip_geo (
-      ip         TEXT PRIMARY KEY,
-      country    TEXT NOT NULL DEFAULT '',
-      region     TEXT NOT NULL DEFAULT '',
-      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+      ip           TEXT PRIMARY KEY,
+      country      TEXT NOT NULL DEFAULT '',
+      country_code TEXT NOT NULL DEFAULT '',
+      region       TEXT NOT NULL DEFAULT '',
+      city         TEXT NOT NULL DEFAULT '',
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
     CREATE TABLE IF NOT EXISTS wishes (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,14 +140,17 @@ function init(): DatabaseSync {
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
     CREATE TABLE IF NOT EXISTS tryon_items (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      type       TEXT NOT NULL,
-      name       TEXT NOT NULL,
-      emoji      TEXT NOT NULL DEFAULT '',
-      prompt     TEXT NOT NULL,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      enabled    INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      type             TEXT NOT NULL,
+      name             TEXT NOT NULL,
+      emoji            TEXT NOT NULL DEFAULT '',
+      prompt           TEXT NOT NULL,
+      image_path       TEXT,
+      image_path_anime TEXT,
+      image_path_real  TEXT,
+      sort_order       INTEGER NOT NULL DEFAULT 0,
+      enabled          INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
     CREATE INDEX IF NOT EXISTS idx_tryon_items_type ON tryon_items(type, enabled);
     CREATE TABLE IF NOT EXISTS tryon_jobs (
@@ -193,8 +198,36 @@ function init(): DatabaseSync {
   } catch {
     /* column already exists */
   }
+  // 素材图：素材可视化（admin 上传 / 后续批量生成），生成时可作参考
+  try {
+    d.exec(`ALTER TABLE tryon_items ADD COLUMN image_path TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  // 按画风拆分的参考图：动漫风 / 真人风各一张，生成时按选中画风取用
+  try {
+    d.exec(`ALTER TABLE tryon_items ADD COLUMN image_path_anime TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    d.exec(`ALTER TABLE tryon_items ADD COLUMN image_path_real TEXT`);
+  } catch {
+    /* column already exists */
+  }
   try {
     d.exec(`ALTER TABLE posts ADD COLUMN tryon_job_id INTEGER`);
+  } catch {
+    /* column already exists */
+  }
+  // ip_geo 老库迁移：补充 country_code / city 列（国旗与城市展示用）
+  try {
+    d.exec(`ALTER TABLE ip_geo ADD COLUMN country_code TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    d.exec(`ALTER TABLE ip_geo ADD COLUMN city TEXT NOT NULL DEFAULT ''`);
   } catch {
     /* column already exists */
   }
@@ -695,7 +728,9 @@ export function deleteComment(id: number) {
 export interface IpGeoRow {
   ip: string;
   country: string;
+  country_code: string;
   region: string;
+  city: string;
 }
 
 export function getIpGeo(ips: string[]): Map<string, IpGeoRow> {
@@ -703,19 +738,20 @@ export function getIpGeo(ips: string[]): Map<string, IpGeoRow> {
   if (ips.length === 0) return out;
   const placeholders = ips.map(() => '?').join(',');
   const rows = getDb()
-    .prepare(`SELECT ip, country, region FROM ip_geo WHERE ip IN (${placeholders})`)
+    .prepare(`SELECT ip, country, country_code, region, city FROM ip_geo WHERE ip IN (${placeholders})`)
     .all(...ips) as unknown as IpGeoRow[];
   for (const r of rows) out.set(r.ip, r);
   return out;
 }
 
-export function saveIpGeo(ip: string, country: string, region: string) {
+export function saveIpGeo(ip: string, country: string, region: string, city = '', countryCode = '') {
   getDb()
     .prepare(
-      `INSERT INTO ip_geo (ip, country, region) VALUES (?, ?, ?)
-       ON CONFLICT(ip) DO UPDATE SET country = excluded.country, region = excluded.region, updated_at = datetime('now','localtime')`
+      `INSERT INTO ip_geo (ip, country, country_code, region, city) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(ip) DO UPDATE SET country = excluded.country, country_code = excluded.country_code,
+         region = excluded.region, city = excluded.city, updated_at = datetime('now','localtime')`
     )
-    .run(ip, country, region);
+    .run(ip, country, countryCode, region, city);
 }
 
 // --- wishes (许愿池) ---
@@ -807,6 +843,9 @@ export interface TryonItem {
   name: string;
   emoji: string;
   prompt: string;
+  image_path: string | null;
+  image_path_anime: string | null;
+  image_path_real: string | null;
   sort_order: number;
   enabled: number; // 0 | 1
   names_json: string | null; // MultiLang JSON, e.g. {"en":"White Shirt","zh":"白衬衫",...}
@@ -865,22 +904,26 @@ export function insertTryonItem(
   prompt: string,
   emoji = '',
   sortOrder = 0,
-  namesJson: string | null = null
+  namesJson: string | null = null,
+  imagePath: string | null = null
 ): number {
   const r = getDb()
-    .prepare(`INSERT INTO tryon_items (type, name, emoji, prompt, sort_order, names_json) VALUES (?, ?, ?, ?, ?, ?)`)
+    .prepare(
+      `INSERT INTO tryon_items (type, name, emoji, prompt, sort_order, names_json, image_path) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
     .run(
       type,
       name.trim().slice(0, 60),
       emoji.trim().slice(0, 8),
       prompt.trim().slice(0, 500),
       sortOrder,
-      namesJson ? namesJson.slice(0, 2000) : null
+      namesJson ? namesJson.slice(0, 2000) : null,
+      imagePath
     );
   return Number(r.lastInsertRowid);
 }
 
-export function updateTryonItem(id: number, fields: Partial<Pick<TryonItem, 'name' | 'prompt' | 'emoji' | 'sort_order' | 'enabled' | 'names_json'>>) {
+export function updateTryonItem(id: number, fields: Partial<Pick<TryonItem, 'name' | 'prompt' | 'emoji' | 'sort_order' | 'enabled' | 'names_json' | 'image_path' | 'image_path_anime' | 'image_path_real'>>) {
   const sets: string[] = [];
   const params: (string | number | null)[] = [];
   if (fields.name !== undefined) {
@@ -906,6 +949,18 @@ export function updateTryonItem(id: number, fields: Partial<Pick<TryonItem, 'nam
   if (fields.enabled !== undefined) {
     sets.push(`enabled = ?`);
     params.push(fields.enabled ? 1 : 0);
+  }
+  if (fields.image_path !== undefined) {
+    sets.push(`image_path = ?`);
+    params.push(fields.image_path);
+  }
+  if (fields.image_path_anime !== undefined) {
+    sets.push(`image_path_anime = ?`);
+    params.push(fields.image_path_anime);
+  }
+  if (fields.image_path_real !== undefined) {
+    sets.push(`image_path_real = ?`);
+    params.push(fields.image_path_real);
   }
   if (sets.length === 0) return;
   params.push(id);

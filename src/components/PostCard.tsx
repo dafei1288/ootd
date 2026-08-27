@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import { SITE_URL, parseMulti, type Lang } from '@/lib/config';
+import { parseMulti, type Lang } from '@/lib/config';
+import { siteUrl } from '@/lib/site';
 import type { Post } from '@/lib/db';
 import { t as ui } from '@/lib/i18n';
 import LikeButton from './LikeButton';
 import ShareButton from './ShareButton';
 
-export default function PostCard({
+export default async function PostCard({
   post,
   lang,
   prefix,
@@ -23,6 +24,7 @@ export default function PostCard({
   const t = parseMulti(post.title_json);
   const title = t?.[lang] ?? t?.en ?? '';
   const href = `${prefix}/page/${post.slug}`;
+  const shareUrl = `${await siteUrl()}${href}`;
   return (
     <div className="group flex flex-col overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-neutral-200 transition hover:shadow-md">
       <Link href={href}>
@@ -51,7 +53,7 @@ export default function PostCard({
         <div className="mt-3 flex items-center gap-2">
           <LikeButton id={post.id} count={post.likes} liked={liked} ariaLabel={ui('like.aria', lang)} />
           <ShareButton
-            url={`${SITE_URL}${href}`}
+            url={shareUrl}
             title={title}
             label={ui('share.label', lang)}
             copiedText={ui('share.copied', lang)}

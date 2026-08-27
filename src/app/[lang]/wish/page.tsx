@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { listPendingWishes, listDoneWishes, siteName } from '@/lib/db';
-import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
+import { LANGS, LANG_KEYS, type Lang } from '@/lib/config';
+import { langUrl } from '@/lib/site';
 import { withSeo } from '@/lib/seo';
 import { t } from '@/lib/i18n';
 import { addWishAction } from '@/app/[lang]/actions';

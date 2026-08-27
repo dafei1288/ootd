@@ -1,9 +1,11 @@
 'use server';
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { cookies, headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { after } from 'next/server';
-import { insertTopic, retryPost, deletePost, setSetting, clearLogs, deleteSearchTerm, deleteComment, setCommentStatus, getWishes, markWishesDone, deleteWish, saveSnippet, setSnippetEnabled, deleteSnippet, insertTryonItem, updateTryonItem, setTryonItemEnabled, deleteTryonItem, deleteTryonJob, updateTryonJob, getPost, publishPost, getTryonJob, insertTryonPost, replaceTags, addTryonSourceTag, setPostStatus, type TryonItemType } from '@/lib/db';
+import { insertTopic, retryPost, deletePost, setSetting, clearLogs, deleteSearchTerm, deleteComment, setCommentStatus, getWishes, markWishesDone, deleteWish, saveSnippet, setSnippetEnabled, deleteSnippet, insertTryonItem, updateTryonItem, setTryonItemEnabled, deleteTryonItem, deleteTryonJob, updateTryonJob, getPost, publishPost, getTryonJob, insertTryonPost, replaceTags, addTryonSourceTag, setPostStatus, IMAGES_DIR, type TryonItemType } from '@/lib/db';
 import { updatePostContent, getTryonPostByJob } from '@/lib/db';
 import { generateTopics, runPipeline } from '@/lib/pipeline/run';
 import { ensureSeeded, applySeedTranslations } from '@/lib/tryon/catalog';
@@ -79,10 +81,16 @@ export async function saveSettings(formData: FormData) {
   const name = String(formData.get('site_name') ?? '').trim();
   const copyright = String(formData.get('copyright') ?? '').trim();
   const icp = String(formData.get('icp') ?? '').trim();
+  const siteUrl = String(formData.get('site_url') ?? '').trim().replace(/\/+$/, '');
+  // 只接受 http(s) 绝对地址；非法输入清空（回退 .env 的 SITE_URL）
+  setSetting('site_url', /^https?:\/\//i.test(siteUrl) ? siteUrl : '');
   if (name) setSetting('site_name', name);
   setSetting('copyright', copyright);
   setSetting('icp', icp);
+  setSetting('site_url', siteUrl);
   revalidatePath('/', 'layout');
+  revalidatePath('/sitemap.xml');
+  revalidatePath('/robots.txt');
   revalidatePath('/admin_config');
 }
 
@@ -250,6 +258,29 @@ export async function updateTryonItemAction(formData: FormData) {
 export async function toggleTryonItemAction(formData: FormData) {
   if (!(await authed())) return;
   setTryonItemEnabled(Number(formData.get('id')), formData.get('enabled') === '1');
+  revalidatePath('/admin_config');
+  revalidatePath('/', 'layout');
+}
+
+/** 删除素材图（仅删文件 + 清字段，素材本身保留）。style: default|anime|real */
+export async function removeTryonItemImageAction(formData: FormData) {
+  if (!(await authed())) return;
+  const id = Number(formData.get('id'));
+  const style = String(formData.get('style') ?? 'default');
+  if (!Number.isFinite(id) || id <= 0) return;
+  const fileKey = style === 'anime' || style === 'real' ? style : 'item';
+  try {
+    fs.unlinkSync(path.join(IMAGES_DIR, `tryon_item_${id}_${fileKey}.png`));
+  } catch {
+    /* 文件不存在忽略 */
+  }
+  const field =
+    style === 'anime'
+      ? { image_path_anime: null }
+      : style === 'real'
+        ? { image_path_real: null }
+        : { image_path: null };
+  updateTryonItem(id, field);
   revalidatePath('/admin_config');
   revalidatePath('/', 'layout');
 }

@@ -2,7 +2,8 @@ import type { Metadata } from 'next';
 import { enabledCatalog, itemName } from '@/lib/tryon/catalog';
 import { clientIdentity, getTryonSettings } from '@/lib/tryon/guard';
 import { getTryonQuota, listTryonJobs, todayStr, type TryonItem, type TryonItemType } from '@/lib/db';
-import { LANGS, type Lang } from '@/lib/config';
+import { type Lang } from '@/lib/config';
+import { langUrl } from '@/lib/site';
 import { t } from '@/lib/i18n';
 import { withSeo } from '@/lib/seo';
 import TryOnRoom from '@/components/TryOnRoom';
@@ -15,7 +16,7 @@ export async function generateMetadata({ params }: { params: Promise<{ lang: Lan
     {
       title: `${t('nav.tryon', lang)} — Anime OOTD`,
       description: t('tryon.tagline', lang),
-      alternates: { canonical: `${LANGS[lang].prefix}/tryon` },
+      alternates: { canonical: langUrl(lang, '/tryon') },
     },
     { lang },
   );
@@ -45,6 +46,10 @@ export default async function TryonPage({ params }: { params: Promise<{ lang: La
         name: itemName(it, lang),
         emoji: it.emoji,
         prompt: it.prompt,
+        // 展示图：优先通用图，其次动漫/真人参考图
+        image_path: it.image_path ?? it.image_path_anime ?? it.image_path_real,
+        image_path_anime: it.image_path_anime,
+        image_path_real: it.image_path_real,
         sort_order: it.sort_order,
         enabled: it.enabled,
       })),

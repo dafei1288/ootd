@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { listPublished, siteName, getTagsForPosts, getCommentCounts, recordSearch } from '@/lib/db';
-import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
+import { LANGS, LANG_KEYS, type Lang } from '@/lib/config';
+import { langUrl } from '@/lib/site';
 import { t } from '@/lib/i18n';
 import { withSeo } from '@/lib/seo';
 import PostCard from '@/components/PostCard';

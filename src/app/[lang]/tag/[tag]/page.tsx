@@ -2,7 +2,8 @@ import { notFound } from 'next/navigation';
 import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
 import { listPostsByTag, siteName, getTagsForPosts, getCommentCounts } from '@/lib/db';
-import { LANGS, langUrl, type Lang } from '@/lib/config';
+import { LANGS, parseMulti, type Lang } from '@/lib/config';
+import { langUrl } from '@/lib/site';
 import { withSeo } from '@/lib/seo';
 import PostCard from '@/components/PostCard';
 
@@ -54,6 +55,26 @@ export default async function TagPage({ params }: { params: Promise<{ lang: Lang
   return (
     <>
       <h1 className="mb-8 text-xl font-bold">{tag}</h1>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            '@context': 'https://schema.org',
+            '@type': 'ItemList',
+            name: tag,
+            url: langUrl(lang, `/tag/${encodeURIComponent(tag)}`),
+            itemListElement: posts.slice(0, 20).map((p, i) => {
+              const t = parseMulti(p.title_json);
+              return {
+                '@type': 'ListItem',
+                position: i + 1,
+                name: t?.[lang] ?? t?.en ?? '',
+                url: langUrl(lang, `/page/${p.slug}`),
+              };
+            }),
+          }),
+        }}
+      />
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {posts.map((p) => (
           <PostCard

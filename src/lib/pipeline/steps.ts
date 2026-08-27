@@ -208,3 +208,55 @@ export async function fetchImage(prompt: string): Promise<{ buffer: Buffer; prom
   }
   throw new Error('image API returned neither url nor b64_json');
 }
+
+/**
+ * 图生图（多参考图）：直连 dmxapi images/generations，把参考图作为 input_image 数组传入。
+ * 用 fetch 而非 openai SDK —— SDK 的 zod 校验会剥掉非标准字段 input_image。
+ * 参考图存在时模型用 TRYON_IMAGE_MODEL（默认 seedream-4-0 多参考），尺寸 1920x1920。
+ */
+export async function fetchImageWithRefs(
+  prompt: string,
+  refImages: string[]
+): Promise<{ buffer: Buffer; promptTokens: number | null; completionTokens: number | null }> {
+  const apiKey = process.env.DMXAPI_KEY;
+  if (!apiKey) throw new Error('DMXAPI_KEY is not set');
+  const base = (process.env.DMXAPI_BASE_URL ?? 'https://www.dmxapi.cn/v1').replace(/\/+$/, '');
+  const model = process.env.TRYON_IMAGE_MODEL ?? 'doubao-seedream-4-0-250828';
+
+  const body: Record<string, unknown> = {
+    model,
+    prompt,
+    n: 1,
+    size: '1920x1920', // seedream 要求 >= 3686400 像素
+  };
+  if (refImages.length > 0) body.input_image = refImages;
+
+  const res = await fetch(`${base}/images/generations`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`image API ${res.status}: ${t.slice(0, 200)}`);
+  }
+  const j = (await res.json()) as {
+    data?: { b64_json?: string; url?: string }[];
+    usage?: { prompt_tokens?: number; input_tokens?: number; output_tokens?: number; total_tokens?: number };
+  };
+  const item = j.data?.[0];
+  if (!item) throw new Error('image API returned no data');
+  const u = j.usage;
+  const promptTokens = u?.prompt_tokens ?? u?.input_tokens ?? null;
+  const completionTokens =
+    u?.output_tokens ?? (u?.total_tokens != null && promptTokens != null ? u.total_tokens - promptTokens : null);
+  if (item.b64_json) {
+    return { buffer: Buffer.from(item.b64_json, 'base64'), promptTokens, completionTokens };
+  }
+  if (item.url) {
+    const resp = await fetch(item.url);
+    if (!resp.ok) throw new Error(`image download failed: ${resp.status}`);
+    return { buffer: Buffer.from(await resp.arrayBuffer()), promptTokens, completionTokens };
+  }
+  throw new Error('image API returned neither url nor b64_json');
+}

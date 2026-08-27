@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { LANGS, LANG_KEYS, langUrl, type Lang } from '@/lib/config';
+import { LANGS, LANG_KEYS, type Lang } from '@/lib/config';
+import { langUrl, siteUrl } from '@/lib/site';
 import { siteName, getSetting } from '@/lib/db';
 import { t } from '@/lib/i18n';
 
@@ -20,6 +21,8 @@ export default async function LangLayout({
   const icp = getSetting('icp') ?? process.env.ICP?.trim() ?? '';
   return (
     <div className="mx-auto max-w-5xl px-4">
+      {/* RSS feed 链接（hoist 到 <head>，供订阅器与 AI 引擎发现） */}
+      <link rel="alternate" type="application/rss+xml" title={`${name} RSS`} href={`${await siteUrl()}/feed.xml`} />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{

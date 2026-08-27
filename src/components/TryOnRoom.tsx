@@ -58,6 +58,8 @@ export default function TryOnRoom({ lang, catalog, defaults, history: initHistor
   });
   const [history, setHistory] = useState<JobCard[]>(initHistory);
   const [result, setResult] = useState<ResultState>({ status: 'idle' });
+  // hover 素材预览卡片：跟随鼠标显示单品大图（动漫/真人两张）
+  const [preview, setPreview] = useState<{ it: TryonItem; x: number; y: number } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [remaining, setRemaining] = useState(Math.max(0, perUserDaily - todayQuota));
   const [isPending, startTransition] = useTransition();
@@ -207,13 +209,35 @@ export default function TryOnRoom({ lang, catalog, defaults, history: initHistor
                     type="button"
                     onClick={() => toggle(g.type, it.id)}
                     title={it.name}
+                    onMouseEnter={(e) =>
+                      it.image_path && setPreview({ it, x: e.clientX, y: e.clientY })
+                    }
+                    onMouseMove={(e) =>
+                      setPreview((p) => (p && p.it.id === it.id ? { it: p.it, x: e.clientX, y: e.clientY } : p))
+                    }
+                    onMouseLeave={() => setPreview((p) => (p && p.it.id === it.id ? null : p))}
                     className={`rounded-full border px-3 py-1.5 text-sm transition ${
                       active
                         ? 'border-neutral-900 bg-neutral-900 text-white'
                         : 'border-neutral-300 bg-white text-neutral-700 hover:border-neutral-500'
                     }`}
                   >
-                    {it.emoji} {it.name}
+                    {it.image_path ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={imageUrl(it.image_path)}
+                          alt={it.name}
+                          loading="lazy"
+                          className="h-8 w-8 rounded-full object-cover"
+                        />
+                        {it.name}
+                      </span>
+                    ) : (
+                      <>
+                        {it.emoji} {it.name}
+                      </>
+                    )}
                   </button>
                 );
               })}
@@ -364,6 +388,33 @@ export default function TryOnRoom({ lang, catalog, defaults, history: initHistor
           )}
         </div>
       </div>
+      {/* hover 单品大图预览：鼠标悬停素材时显示（动漫/真人两张对照） */}
+      {preview?.it.image_path && (
+        <div
+          className="pointer-events-none fixed z-50"
+          style={{
+            left: Math.min(preview.x + 16, (typeof window !== 'undefined' ? window.innerWidth : 1024) - 460),
+            top: Math.min(preview.y + 16, (typeof window !== 'undefined' ? window.innerHeight : 768) - 240),
+          }}
+        >
+          <div className="flex gap-2 rounded-xl bg-white p-2 shadow-2xl ring-1 ring-neutral-200">
+            {[preview.it.image_path_anime, preview.it.image_path_real]
+              .filter(Boolean)
+              .map((p, i) => (
+                <div key={i} className="flex flex-col items-center gap-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imageUrl(p!)}
+                    alt={preview.it.name}
+                    className="h-44 w-44 rounded-lg object-cover"
+                  />
+                  <span className="text-[10px] text-neutral-400">{i === 0 ? '动漫' : '真人'}</span>
+                </div>
+              ))}
+          </div>
+          <p className="mt-1 text-center text-xs font-medium text-neutral-700">{preview.it.name}</p>
+        </div>
+      )}
     </div>
   );
 }
